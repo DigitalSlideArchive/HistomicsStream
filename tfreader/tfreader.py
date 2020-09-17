@@ -1,3 +1,7 @@
+"""Whole-slide image file reader for TensorFlow"""
+
+__version__ = "1.0.0"
+
 from datetime import datetime
 import h5py
 from matplotlib import pyplot as plt
