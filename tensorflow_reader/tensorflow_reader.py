@@ -336,7 +336,7 @@ def strategyExample():
   return devices, strategy, model
 
 
-def readExample(chunkFactor = 8):
+def readExample():
   tic = time.time()
   #using numpy_function allows mapping of keras functions to dataset elements
 
@@ -349,8 +349,8 @@ def readExample(chunkFactor = 8):
   magnification=20.0
   tile=(tf.constant(256, dtype=tf.int32),
         tf.constant(256, dtype=tf.int32))
-  chunkFactor=(tf.constant(chunkFactor, dtype=tf.int32),
-               tf.constant(chunkFactor, dtype=tf.int32))
+  chunkFactor=(tf.constant(8, dtype=tf.int32),
+               tf.constant(8, dtype=tf.int32))
   overlap=(tf.constant(0, dtype=tf.int32),
            tf.constant(0, dtype=tf.int32))
   AUTOTUNE = tf.data.experimental.AUTOTUNE
