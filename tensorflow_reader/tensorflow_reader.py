@@ -1,6 +1,6 @@
 """Whole-slide image file reader for TensorFlow"""
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 from datetime import datetime
 import h5py
@@ -12,29 +12,42 @@ import time
 
 
 def _assign_field(element, field, value):
-  #Assigns value to field of dict element. This is a wrapper used for assignment
-  #of fields in dict dataset elements since the lambda functions used with
-  #tf.data.Dataset.map cannot perform assignments.
-  #Typical usage Dataset.map(lambda element: assign_field(element, 'tiles',
-  #imresize(element['tiles'])))
-  element[field] = value
-  return element
+  #Consistent with tensorflow graphs, this function does not modify
+  #any of its inputs
+
+  #Add a field to a struct. Use with tf.data.Dataset.map.
+  return {**element, field: value}
 
 
-def _add_fields(element, fields, values):
-  #Add fields to struct. Use with tf.data.Dataset.map. Operates in-place.
+def _add_fields(elem, fields, values):
+  #Consistent with tensorflow graphs, this function does not modify
+  #any of its inputs
+
+  #Add fields to struct. Use with tf.data.Dataset.map.
+  element = {**elem}
   for field, value in zip(fields, values):
     element[field] = value
   return element
 
 
-def _expand_tensors(element, fields, reference):
+def _expand_tensors(elem, fields, reference):
+  #Consistent with tensorflow graphs, this function does not modify
+  #any of its inputs
+
   #Expands tensor fields in dataset element to match the length of a reference
   #field. This allows application of tf.data.Dataset.flat_map to expand from
   #a read-chunk element dataset to a tile dataset using from_tensor_slices.
 
+  element = {**elem}
   #get reference field length
   length = tf.size(element[reference])
+
+  #This may lead to trouble when `reference` is of size/length 0
+  #because every key in `elem`, whether or not in `fields`, will end
+  #up being a list of length 0.  Unlike lists with a longer length,
+  #all shape information of each value (in the key-value pair) is lost
+  #with a list of length 0.  Especially if it is the first batch, this
+  #may cause a later `flat_map` or `unbatch` command to fail.
 
   #iterate over fields removing singleton dimensions and repeating
   for field in fields:
@@ -56,11 +69,25 @@ def _tile_coords(width, height, tw, th, ow, oh, fractional):
 # We omit these narrower tiles unless `fractional` is set to true.
 #... and similarly for heights instead of widths.
 
+  '''
+  if (tf.math.greater_equal(ow, tw)):
+    print("bool = %s, ow = %s, tw = %s" % (tf.math.greater_equal(ow, tw), ow, tw))
+    raise ValueError('Tile width overlap must be less than tile width.')
+  if (tf.math.greater_equal(oh, th)):
+    print("oh = %s, th = %s" % (oh, th))
+    raise ValueError('Tile height overlap must be less than tile height.')
+  '''
+
+  zero = tf.constant(0, dtype=tf.int32)
+  one = tf.constant(1, dtype=tf.int32)
   #Generate list of read coordinates
-  left = tf.range(0, width-ow if fractional else width-tw+1, tw-ow)
-  right = tf.clip_by_value(left+tw, 0, width)
-  top = tf.range(0, height-oh if fractional else height-th+1, th-oh)
-  bottom = tf.clip_by_value(top+th, 0, height)
+  left_limit = tf.maximum(zero, width-ow if fractional else width-tw+one)
+  left = tf.range(zero, left_limit, tw-ow)
+  right = tf.clip_by_value(left+tw, zero, width)
+
+  top_limit = tf.maximum(zero, height-oh if fractional else height-th+one)
+  top = tf.range(zero, top_limit, th-oh)
+  bottom = tf.clip_by_value(top+th, zero, height)
   l = tf.repeat(left, tf.size(top))
   w = tf.repeat(right-left, tf.size(top))
   t = tf.tile(top, tf.stack([tf.size(left)]))
@@ -71,8 +98,7 @@ def _tile_coords(width, height, tw, th, ow, oh, fractional):
 
 def _add_tile_coords_fields(element, tile, overlap):
     tx, ty, tw, th = _tile_coords(element['cw'], element['ch'], tile[0], tile[1], overlap[0], overlap[1], False)
-    _add_fields(element, ['tx', 'ty', 'tw', 'th', 'ow', 'oh'], [tx, ty, tw, th, overlap[0], overlap[1]])
-    return element
+    return _add_fields(element, ['tx', 'ty', 'tw', 'th', 'ow', 'oh'], [tx, ty, tw, th, overlap[0], overlap[1]])
 
 
 def get_read_parameters(filename, magnification, tolerance = 1e-2):
@@ -129,7 +155,7 @@ def _read_chunk(element):
 
   #read chunk and convert to tensor
   chunk = tf_read_region(element['filename'],
-                         tf.cast(element['level'], dtype=tf.uint32),
+                         tf.cast(element['level'], dtype=tf.int32),
                          element['cx'], element['cy'],
                          element['cw'], element['ch'])
 
@@ -295,10 +321,26 @@ def tiled(filename, slide='', case='', magnification=20.0, tile=(256, 256),
 
   return tiled
 
+def strategyExample():
+  #find available GPUs
+  devices=[gpu.name.replace('/physical_device:', '/').lower() for gpu in tf.config.experimental.list_physical_devices('GPU')]
+
+  #define strategy
+  strategy = tf.distribute.MirroredStrategy(devices=devices)
+
+  #generate network model
+  with strategy.scope():
+      model = tf.keras.applications.VGG16(include_top=True, weights='imagenet')
+      model = tf.keras.Model(inputs=model.input, outputs=model.get_layer('fc1').output)
+
+  return devices, strategy, model
+
 
 def readExample():
   tic = time.time()
   #using numpy_function allows mapping of keras functions to dataset elements
+
+  devices, strategy, model = strategyExample()
 
   #set slide and read parameters
   filename='TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs'
@@ -312,16 +354,7 @@ def readExample():
   overlap=(tf.constant(0, dtype=tf.int32),
            tf.constant(0, dtype=tf.int32))
   AUTOTUNE = tf.data.experimental.AUTOTUNE
-  devices=[gpu.name.replace('/physical_device:', '/').lower() for gpu in tf.config.experimental.list_physical_devices('GPU')]
   batch_size = 128*len(devices)
-
-  #define strategy
-  strategy = tf.distribute.MirroredStrategy(devices=devices)
-
-  #generate network model
-  with strategy.scope():
-      model = tf.keras.applications.VGG16(include_top=True, weights='imagenet')
-      model = tf.keras.Model(inputs=model.input, outputs=model.get_layer('fc1').output)
 
   #generate tiles dataset
   tiles = tiled(filename, slide, case, magnification,
