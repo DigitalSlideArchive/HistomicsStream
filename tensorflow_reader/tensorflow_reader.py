@@ -48,7 +48,7 @@ def readExample():
   tic = time.time()
 
   devices, strategy, model = strategyExample()
-
+  AUTOTUNE = {'num_parallel_calls': tf.data.experimental.AUTOTUNE}
   # Each key=value pair in the dictionary should have a value that is
   # a list of the same length.  Taken together, the Nth entry from
   # each list comprise a dictionary that is the Nth element in the
@@ -94,18 +94,17 @@ def readExample():
   # value if a chunk is near the edge of an image.  Note that it is
   # important to call `.unbatch()` when it is desired that the chunks
   # be not batched by slide.
-  tiles = tiles.map(tf_ComputeChunkPositions).unbatch()
+  tiles = tiles.map(tf_ComputeChunkPositions, **AUTOTUNE).unbatch()
 
   # Read and split the chunks into the tile size we want.  Note that
   # it is important to call `.unbatch()` when it is desired that the
   # tiles be not batched by chunk.
-  tiles = tiles.map(tf_ReadAndSplitChunk).prefetch(1).unbatch()
+  tiles = tiles.map(tf_ReadAndSplitChunk, **AUTOTUNE).prefetch(tf.data.experimental.AUTOTUNE).unbatch()
 
   # Change the element to be of the form `(tile, metadataDictionary)`
   # rather than `alldataDictionary`.
-  tiles = tiles.map(lambda elem: (elem.pop('tile'), elem))
+  tiles = tiles.map(lambda elem: (elem.pop('tile'), elem), **AUTOTUNE)
 
-  AUTOTUNE = tf.data.experimental.AUTOTUNE
   batch_size = 128*len(devices)
 
   #batch tiles
@@ -114,14 +113,11 @@ def readExample():
   #apply preprocessing to batched tiles - resize, float conversion, preprocessing
   batched = batched.map(lambda tile, metadata:
                         (tf.cast(tf.image.resize(tile, [224, 224]), tf.float32),
-                         metadata),
-                        num_parallel_calls=AUTOTUNE)
+                         metadata), **AUTOTUNE)
   batched = batched.map(lambda tile, metadata:
                         (tf.keras.applications.resnet_v2.preprocess_input(tile),
-                         metadata),
-                        num_parallel_calls=AUTOTUNE)
+                         metadata), **AUTOTUNE)
 
-  #set prefetch
   batched_dist = strategy.experimental_distribute_dataset(batched)
   print('Read and resize dataset: %f seconds' % (time.time() - tic))
   return model, batched_dist, strategy
