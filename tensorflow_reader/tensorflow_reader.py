@@ -1,6 +1,6 @@
 """Whole-slide image file reader for TensorFlow"""
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 
 from datetime import datetime
 import h5py
