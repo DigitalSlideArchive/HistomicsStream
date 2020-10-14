@@ -30,6 +30,7 @@ def _merge_dist_dict(strategy, distributed, axis=0):
 
 
 def strategyExample():
+  tic = time.time()
   #find available GPUs
   devices=[gpu.name.replace('/physical_device:', '/').lower() for gpu in tf.config.experimental.list_physical_devices('GPU')]
 
@@ -41,13 +42,13 @@ def strategyExample():
       model = tf.keras.applications.VGG16(include_top=True, weights='imagenet')
       model = tf.keras.Model(inputs=model.input, outputs=model.get_layer('fc1').output)
 
+  print('strategyExample: %f seconds' % (time.time() - tic))
   return devices, strategy, model
 
 
-def readExample():
+def readExample(devices, strategy, model):
   tic = time.time()
 
-  devices, strategy, model = strategyExample()
   AUTOTUNE = {'num_parallel_calls': tf.data.experimental.AUTOTUNE}
   # Each key=value pair in the dictionary should have a value that is
   # a list of the same length.  Taken together, the Nth entry from
@@ -119,7 +120,7 @@ def readExample():
                          metadata), **AUTOTUNE)
 
   batched_dist = strategy.experimental_distribute_dataset(batched)
-  print('Read and resize dataset: %f seconds' % (time.time() - tic))
+  print('readExample: %f seconds' % (time.time() - tic))
   return model, batched_dist, strategy
 
 
@@ -150,11 +151,7 @@ def predictExample(model, batched_dist, strategy):
       metadata[key] = tf.concat([meta[key] for meta in metadata_list], axis=0)
   del metadata_list
 
-  #map tile coordinates from chunk frame to global slide frame
-  metadata['tx'] = metadata['tx'] + metadata['cx']
-  metadata['ty'] = metadata['ty'] + metadata['cy']
-
-  print('Predict distributed dataset: %f seconds' % (time.time() - tic))
+  print('predictExample: %f seconds' % (time.time() - tic))
   return features, metadata
 
 
@@ -173,7 +170,7 @@ def outputExample(features, metadata):
       handle.create_dataset('wsi_mean', data=np.zeros(3), dtype='float')
       handle.create_dataset('wsi_std', data=np.zeros(3), dtype='float')
 
-  print('Writing h5 data: %f seconds' % (time.time() - tic))
+  print('outputExample: %f seconds' % (time.time() - tic))
 
   #write superpixel boundaries to disk
 
