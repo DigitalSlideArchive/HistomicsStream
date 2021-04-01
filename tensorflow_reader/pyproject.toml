@@ -1,14 +1,23 @@
 [build-system]
 requires = [
          "flit_core >=2,<4",
-         "h5py",
-         "matplotlib",
-         "numpy",
-         "openslide-python",
          ]
 build-backend = "flit_core.buildapi"
 
 [tool.flit.metadata]
+requires = [
+         "h5py",
+         "imagecodecs",
+         "matplotlib",
+         "napari-lazy-openslide",
+         "numcodecs",
+         "numpy",
+         "openslide-python",
+         "Pillow",
+         "tensorflow-gpu",
+         "tiffile",
+         "zarr",
+         ]
 module = "tensorflow_reader"
 author = "Lee Newberg"
 author-email = "lee.newberg@kitware.com"
