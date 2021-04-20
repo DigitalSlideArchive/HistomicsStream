@@ -2918,49 +2918,25 @@ def py_compute_resampled_mask(
     # that, we will not be looking at the mask pixels for adjacent tiles even though they may overlap
     # with the tile being considered.
 
-    # Read in an ITK image from the supplied file name for the mask
-    mask = itk.imread(mask_filename)
-    mask_dimension = mask.GetImageDimension()
-    if mask_dimension != 2:
-        raise ValueError("The mask should be a 2-dimensional image.")
-
     # Note that we are assuming that the mask will be downsampled (or upsampled) to have one whole pixel
     # per tile, even if not every tile is whole; that is even if some are fractional tiles from the
     # right or bottom edges.
 
-    # We use a formula with floor() rather than a formula with ceil() so that we get the same answer
-    # with float or integer division for the argument.
-    resampled_width = np.floor((left_bound - 1) / (tw - ow)) + 1
-    resampled_height = np.floor((top_bound - 1) / (th - oh)) + 1
-    resampled_size = (resampled_width, resampled_height)
-    mask_size = itk.size(mask)  # (width, height)
-    width_scale = resampled_width / mask_size[0]
-    height_scale = resampled_height / mask_size[1]
-    # Warn if width_scale is different from height_scale by more than about 20%.
-    print(f"width_scale = {width_scale}")
-    print(f"height_scale = {height_scale}")
-    if abs(math.log(width_scale / height_scale)) > 0.20:
+    # Read in an image from the supplied file name for the mask
+    mask_itk = itk.imread(mask_filename)
+    if mask_itk.GetImageDimension() != 2:
+        raise ValueError("The mask should be a 2-dimensional image.")
+    mask = tf.constant(itk.array_from_image(mask_itk))
+    # Add batch and channels dimensions
+    mask = mask[tf.newaxis, ..., tf.newaxis]
+    # The new size is one pixel per tile
+    resampled_width = int(np.floor((left_bound - 1) / (tw - ow)) + 1)
+    resampled_height = int(np.floor((top_bound - 1) / (th - oh)) + 1)
+    if abs(math.log((resampled_width / mask.shape[2]) / (resampled_height / mask.shape[1]))) > 0.20:
         raise ValueError("The mask aspect ratio does not match the image aspect ratio.")
-
-    if width_scale == 1 and height_scale == 1:
-        resampled = mask
-    else:
-        resampled_spacing = itk.spacing(mask) * itk.size(mask) / resampled_size
-        resampled_origin = itk.origin(mask) + (resampled_spacing - itk.spacing(mask)) * 0.5
-
-        interpolator = itk.NearestNeighborInterpolateImageFunction.New(mask)
-        resampled = itk.resample_image_filter(
-            mask,
-            interpolator=interpolator,
-            size=resampled_size,
-            output_spacing=resampled_spacing,
-            output_origin=resampled_origin,
-        )
-    del mask
-
-    # resampled has (width, height) index ordering.  resampled_numpy has (height, width) index ordering.
-    resampled_numpy = itk.array_from_image(resampled)
-    del resampled
+    resampled_shape = (resampled_height, resampled_width)
+    # Perform the resampling
+    resampled = tf.image.resize(mask, resampled_shape)[0, ...]
 
     # * At some point the mask gets broken up into chunks that are chunk_height_factor by
     # chunk_width_factor; to make tensorflow happy, we make sure that the dimensions of the mask are
@@ -2970,19 +2946,21 @@ def py_compute_resampled_mask(
     # * Also, we cast the array to type np.bool.  (Note that we use a formula with floor() rather than a
     # formula with ceil() so that we get the same answer with float or integer division for the
     # argument.)
-    padded_resampled_numpy = np.zeros(
+    padded_resampled = np.zeros(
         (
-            int((np.floor((resampled_numpy.shape[0] - 1) / chf) + 1) * chf),
-            int((np.floor((resampled_numpy.shape[1] - 1) / cwf) + 1) * cwf),
+            int((tf.math.floor((resampled_shape[0] - 1) / chf) + 1) * chf),
+            int((tf.math.floor((resampled_shape[1] - 1) / cwf) + 1) * cwf),
             1,
         ),
         dtype=np.bool,
     )
-    padded_resampled_numpy[: resampled_numpy.shape[0], : resampled_numpy.shape[1], 0] = resampled_numpy
-    del resampled_numpy
+    padded_resampled[:resampled_shape[0], :resampled_shape[1], :1,] = resampled
+    del resampled
 
-    print(f"padded_resampled_numpy.shape = {padded_resampled_numpy.shape}")
-    return padded_resampled_numpy
+    # print(f"resampled_shape = {resampled_shape}")
+    # print(f"padded_resampled.shape = {padded_resampled.shape}")
+    # tf.print(padded_resampled[:8,:8,0])
+    return padded_resampled
 
 
 def tf_compute_resampled_mask(elem):
