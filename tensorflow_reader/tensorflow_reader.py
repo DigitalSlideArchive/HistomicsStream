@@ -1,30 +1,36 @@
 """Whole-slide image file reader for TensorFlow"""
 
-__version__ = "1.0.6"
+__version__ = "1.0.7"
 
-from PIL import Image
 from datetime import datetime
+from imagecodecs import jpeg_encode, jpeg_decode, jpeg2k_encode, jpeg2k_decode
 from matplotlib import pyplot as plt
 from napari_lazy_openslide.lazy_openslide import OpenSlideStore
+from numcodecs.abc import Codec
+from numcodecs.compat import ensure_ndarray, ensure_contiguous_ndarray, ndarray_copy
+from numcodecs.registry import register_codec
 from os import makedirs
+from PIL import Image
+import fsspec
 import h5py
+import itk
+import math
 import numpy as np
 import openslide as os
+import random
 import re
 import tensorflow as tf
 import tifffile
 import time
 import zarr
 
-using_zarr_jpeg_package = False  # Better to detect this then to set this!!!
-
-from numcodecs.abc import Codec
-from numcodecs.compat import ensure_ndarray, ensure_contiguous_ndarray, ndarray_copy
-from numcodecs.registry import register_codec
-from imagecodecs import jpeg_encode, jpeg_decode, jpeg2k_encode, jpeg2k_decode
+"""Instead of the zarr_jpeg package we use this jpeg codec.  The former collapses dimensions by default,
+can require us to transpose dimensions, and can miss optimizations based upon RGB data.  Instead we use
+this vanilla jpeg codec.
+"""
 
 
-class kwjpeg(Codec):
+class jpeg(Codec):
     """Codec providing jpeg compression via imagecodecs.
     Parameters
     ----------
@@ -32,7 +38,7 @@ class kwjpeg(Codec):
         Compression level.
     """
 
-    codec_id = "kwjpeg"
+    codec_id = "jpeg"
 
     def __init__(self, quality=100):
         self.quality = quality
@@ -52,7 +58,10 @@ class kwjpeg(Codec):
         return ndarray_copy(tiled, out)
 
 
-register_codec(kwjpeg)
+register_codec(jpeg)
+
+"""Similar to the JPEG codec above, we want a JPEG2K codec
+"""
 
 
 class jpeg2k(Codec):
@@ -71,7 +80,6 @@ class jpeg2k(Codec):
         super().__init__()
 
     def encode(self, buf):
-        # print(f'jpeg2k.encode.quality = {self.quality}')
         bufa = ensure_ndarray(buf)
         assert 2 <= bufa.ndim <= 3
         return jpeg2k_encode(bufa, level=self.quality)
@@ -87,52 +95,12 @@ class jpeg2k(Codec):
 register_codec(jpeg2k)
 
 
-class zarr_codec(Codec):
-    """Codec providing compression via supplied encoder and decoder
-    Parameters
-    ----------
-    Construct with, e.g.,
-        compressor=zarr_codec("jpeg2k", jpeg2k_encode, jpeg2k_decode, quality_mode="dB", quality_layers=(80,))
-    codec_id : str
-        Identifier for codec, such as "jpeg", "jpeg2k".
-    encoder : function
-        The encoding function for the codec, such as jpeg2k_encode, or a wrapping of it, e.g.,
-            def my_jpeg2k_encode(buf):
-                return jpeg2k_encode(buf, level=80)
-    decoder : function
-        The decoding function for the codec, such as jpeg2k_decode
-    """
-
-    def __init__(self, codec_id, encoder, decoder):
-        self.codec_id = codec_id
-        self.encoder = encoder
-        self.decoder = decoder
-        super().__init__()
-
-    def encode(self, buf):
-        bufa = ensure_ndarray(buf)
-        assert 2 <= bufa.ndim <= 3
-        return self.encoder(bufa)
-
-    def decode(self, buf, out=None):
-        buf = ensure_contiguous_ndarray(buf)
-        if out is not None:
-            out = ensure_contiguous_ndarray(out)
-        tiled = self.decoder(buf)
-        return ndarray_copy(tiled, out)
-
-
-register_codec(zarr_codec)
-
-
 def _merge_dist_tensor(strategy, distributed, axis=0):
     # check if input is type produced by distributed.Strategy.run
     if isinstance(distributed, tf.python.distribute.values.PerReplica):
         return tf.concat(strategy.experimental_local_results(distributed), axis=axis)
     else:
-        raise ValueError(
-            "Input to _merge_dist_tensor not a distributed PerReplica tensor."
-        )
+        raise ValueError("Input to _merge_dist_tensor not a distributed PerReplica tensor.")
 
 
 def _merge_dist_dict(strategy, distributed, axis=0):
@@ -145,7 +113,7 @@ def _merge_dist_dict(strategy, distributed, axis=0):
         raise ValueError("Input to _merge_dist_tensor not a dict.")
 
 
-def strategyExample():
+def strategy_example():
     tic = time.time()
     # find available GPUs
     devices = [
@@ -161,15 +129,38 @@ def strategyExample():
     # generate network model
     with strategy.scope():
         model = tf.keras.applications.VGG16(include_top=True, weights="imagenet")
-        model = tf.keras.Model(
-            inputs=model.input, outputs=model.get_layer("fc1").output
-        )
+        model = tf.keras.Model(inputs=model.input, outputs=model.get_layer("fc1").output)
 
-    print("strategyExample: %f seconds" % (time.time() - tic))
+    print("strategy_example: %f seconds" % (time.time() - tic))
     return devices, strategy, model
 
 
-def readExample(devices, strategy):
+def random_mask(shape):  # ITK order: (width, height)
+    # Here we will make a mask with random 0 and 1 values as a demonstration.
+    MaskDimension = 2
+    MaskPixelType = itk.UC
+    MaskImageType = itk.Image[MaskPixelType, MaskDimension]
+    mask_index = itk.Index[MaskDimension]()
+    mask_index.Fill(0)
+    mask_size = itk.Size[MaskDimension]()
+    mask_size[0] = shape[0]  # width
+    mask_size[1] = shape[1]  # height
+    mask_region = itk.ImageRegion[MaskDimension]()
+    mask_region.SetIndex(mask_index)
+    mask_region.SetSize(mask_size)
+    mask_image = MaskImageType.New()
+    mask_image.SetRegions(mask_region)
+    mask_image.Allocate()
+    random.seed("20210311", version=2)
+    for y in range(mask_size[1]):
+        for x in range(mask_size[0]):
+            # Use numpy index order on left-hand side
+            mask_image[y, x] = random.randrange(0, 2)
+
+    return mask_image
+
+
+def read_example(devices, strategy):
     tic = time.time()
 
     dataset_map_options = {
@@ -177,12 +168,11 @@ def readExample(devices, strategy):
         "deterministic": False,
     }
     dataset_map_options = {"num_parallel_calls": tf.data.experimental.AUTOTUNE}
-    # Each key=value pair in the dictionary should have a value that is
-    # a list of the same length.  Taken together, the Nth entry from
-    # each list comprise a dictionary that is the Nth element in the
+    # Each key=value pair in the dictionary should have a value that is a list of the same length.
+    # Taken together, the Nth entry from each list comprise a dictionary that is the Nth element in the
     # dataset.
 
-    allFiles = [
+    all_wsi_images = [
         "jpeg75.stack/0.0.jpeg",
         "jpeg75.stack/0.10240.jpeg",
         "jpeg75.stack/0.12288.jpeg",
@@ -2399,102 +2389,99 @@ def readExample(devices, strategy):
         "jpeg75.stack/98304.8192.jpeg",
     ]
 
-    # allFiles = ['RGBA/default1024.zarr']
-    # allFiles = ['RGBA/default2048.zarr']
-    # allFiles = ['RGBA/default256.zarr']
-    # allFiles = ['RGBA/default4096.zarr']
-    # allFiles = ['RGBA/jpeg50_compressor1024.zarr']
-    # allFiles = ['RGBA/jpeg50_compressor2048.zarr']
-    # allFiles = ['RGBA/jpeg75_compressor1024.zarr']
-    # allFiles = ['RGBA/jpeg75_compressor2048.zarr']
-    # allFiles = ['RGBA/zstd_compressor1024.zarr']
-    # allFiles = ['RGBA/zstd_compressor2048.zarr']
+    # all_wsi_images = ["RGBA/default1024.zarr"]
+    # all_wsi_images = ["RGBA/default2048.zarr"]
+    # all_wsi_images = ["RGBA/default256.zarr"]
+    # all_wsi_images = ["RGBA/default4096.zarr"]
+    # all_wsi_images = ["RGBA/zstd_compressor1024.zarr"]
+    # all_wsi_images = ["RGBA/zstd_compressor2048.zarr"]
 
-    # allFiles = ['TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs']
-    # allFiles = ['default1024.zarr']
-    # allFiles = ['default2048.zarr']
-    # allFiles = ['default256.zarr']
-    # allFiles = ['default4096.zarr']
-    # allFiles = ['jpeg2k_compressor2048.zarr']
-    # allFiles = ['jpeg2klevel80_compressor2048.zarr']
-    # allFiles = ['jpeg50_compressor1024.zarr']
-    # allFiles = ['jpeg50_compressor2048.zarr']
-    # allFiles = ['jpeg75_compressor1024.zarr']
-    # allFiles = ['jpeg75_compressor2048.zarr']
-    # allFiles = ['kwjpeg100_compressor2048.zarr']
-    allFiles = ["kwjpeg30_compressor2048.zarr"]
-    # allFiles = ['kwjpeg30_compressor256.zarr']
-    # allFiles = ['kwjpeg75_compressor2048.zarr']
-    # allFiles = ['kwjpeg95_compressor2048.zarr']
-    # allFiles = ['kwjpegVarious_compressor256.zarr']
-    # allFiles = ['zstd_compressor1024.zarr']
-    # allFiles = ['zstd_compressor2048.zarr']
+    all_wsi_images = ["TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs"]
+    # all_wsi_images = ["default1024.zarr"]
+    # all_wsi_images = ["default2048.zarr"]
+    # all_wsi_images = ["default256.zarr"]
+    # all_wsi_images = ["default4096.zarr"]
+    # all_wsi_images = ["jpeg2k_compressor2048.zarr"]
+    # all_wsi_images = ["jpeg2klevel80_compressor2048.zarr"]
+    # all_wsi_images = ["kwjpeg100_compressor2048.zarr"]
+    # all_wsi_images = ["kwjpeg30_compressor2048.zarr"]
+    # all_wsi_images = ["kwjpeg30_compressor256.zarr"]
+    # all_wsi_images = ["kwjpeg75_compressor2048.zarr"]
+    # all_wsi_images = ["kwjpeg95_compressor2048.zarr"]
+    # all_wsi_images = ["kwjpegVarious_compressor256.zarr"]
+    # all_wsi_images = ["zstd_compressor1024.zarr"]
+    # all_wsi_images = ["zstd_compressor2048.zarr"]
 
-    print(f"Image source = {allFiles}")
+    print(f"Image source = {all_wsi_images}")
+
+    # We will use a mask to determine which tiles of the slide to process.  In this example we will
+    # build the mask name from the WSI file name, by inserting "-mask" and changing the file type to
+    # "png", but generally any file name and file type that we can read as an image will do.
+
+    all_masks = [re.sub(r"^(.*)\.([^\.]*)$", r"\1-mask.png", wsi) for wsi in all_wsi_images]
+    print(f"all_masks = {all_masks}")
+
+    # Give names for these slides
+    all_slides = ["TCGA-BH-A0BZ-01Z-00-DX1" for x in range(len(all_wsi_images))]
 
     header = {
-        "slide": [
-            "TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913"
-            for x in range(len(allFiles))
-        ],
-        "filename": allFiles,
-        "case": ["TCGA-BH-A0BZ" for x in range(len(allFiles))],
-        "magnification": [20.0 for x in range(len(allFiles))],
-        "read_mode": ["tiled" for x in range(len(allFiles))],
+        "slide": all_slides,
+        "filename": all_wsi_images,
+        "case": ["TCGA-BH-A0BZ" for x in range(len(all_wsi_images))],
+        "magnification": [20.0 for x in range(len(all_wsi_images))],
+        "read_mode": ["tiled" for x in range(len(all_wsi_images))],
+        "mask_filename": all_masks,
     }
     tiles = tf.data.Dataset.from_tensor_slices(header)
 
-    # For the desired magnification, find the best level stored in the
-    # image file, and its associated factor, width, and height.
-    tiles = tiles.map(tf_ComputeReadParameters)
+    # For the desired magnification, find the best level stored in the image file, and its associated
+    # factor, width, and height.
+    tiles = tiles.map(tf_compute_read_parameters)
 
-    # We are going to use a regularly spaced tiling for each of our
-    # dataset elements.  To begin, set the desired tile width, height,
-    # width overlap, and height overlap for each element, and indicate
-    # whether we want tiles even if they are fractional (aka of
-    # truncated size) due to partially falling off the edge of the
-    # image.  (These fractional tiles can be problematic because
-    # tensorflow likes its shapes to be uniform.)
-    tileWidth = tf.constant(256, dtype=tf.int32)
-    tileHeight = tileWidth
-    overlapWidth = tf.constant(0, dtype=tf.int32)
-    overlapHeight = overlapWidth
-    # (chunkWidthFactor, chunkHeightFactor) indicates how many
+    # We are going to use a regularly spaced tiling for each of our dataset elements.  To begin, set the
+    # desired tile width, height, width overlap, and height overlap for each element, and indicate
+    # whether we want tiles even if they are fractional (aka of truncated size) due to partially falling
+    # off the edge of the image.  (These fractional tiles can be problematic because tensorflow likes
+    # its shapes to be uniform.)
+    tile_width = tf.constant(256, dtype=tf.int32)
+    tile_height = tile_width
+    overlap_width = tf.constant(0, dtype=tf.int32)
+    overlap_height = overlap_width
+    # (chunk_width_factor, chunk_height_factor) indicates how many
     # (overlapping) tiles are read at a time.
-    chunkWidthFactor = tf.constant(8, dtype=tf.int32)
-    chunkHeightFactor = tf.constant(8, dtype=tf.int32)
+    chunk_width_factor = tf.constant(8, dtype=tf.int32)
+    chunk_height_factor = tf.constant(8, dtype=tf.int32)
     fractional = tf.constant(False, dtype=tf.bool)
-    newFields = {
-        "tw": tileWidth,
-        "th": tileHeight,
-        "ow": overlapWidth,
-        "oh": overlapHeight,
-        "cwf": chunkWidthFactor,
-        "chf": chunkHeightFactor,
+    new_fields = {
+        "tw": tile_width,
+        "th": tile_height,
+        "ow": overlap_width,
+        "oh": overlap_height,
+        "cwf": chunk_width_factor,
+        "chf": chunk_height_factor,
         "fractional": fractional,
     }
-    tiles = tiles.map(lambda elem: {**elem, **newFields})
+    tiles = tiles.map(lambda elem: {**elem, **new_fields})
 
-    # Split each element (e.g. each slide) into a batch of multiple
-    # rows, one per chunk to be read.  Note that the width `cw` or
-    # height `ch` of a row (chunk) may decreased from the requested
-    # value if a chunk is near the edge of an image.  Note that it is
-    # important to call `.unbatch()` when it is desired that the chunks
-    # be not batched by slide.
-    tiles = tiles.map(tf_ComputeChunkPositions, **dataset_map_options).unbatch()
+    # If there are any then read in the masks, one per slide, that specify tile selction.  If they are
+    # not already then downsample (or upsample) the masks to be one pixel per tile.
+    tiles = tiles.map(tf_compute_resampled_mask, **dataset_map_options)
 
-    # Read and split the chunks into the tile size we want.  Note that
-    # it is important to call `.unbatch()` when it is desired that the
-    # tiles be not batched by chunk.
+    # Split each element (e.g. each slide) into a batch of multiple rows, one per chunk to be read.
+    # Note that the width `cw` or height `ch` of a row (chunk) may decreased from the requested value if
+    # a chunk is near the edge of an image.  Note that it is important to call `.unbatch()` when it is
+    # desired that the chunks be not batched by slide.
+    tiles = tiles.map(tf_compute_chunk_positions, **dataset_map_options).unbatch()
+
+    # Read and split the chunks into the tile size we want.  Note that it is important to call
+    # `.unbatch()` when it is desired that the tiles be not batched by chunk.
     tiles = (
-        tiles.map(tf_ReadAndSplitChunk, **dataset_map_options)
+        tiles.map(tf_read_and_split_chunk, **dataset_map_options)
         .prefetch(tf.data.experimental.AUTOTUNE)
         .unbatch()
     )
-    # tiles = tiles.map(tf_ReadAndSplitChunk, **dataset_map_options).prefetch(48).unbatch()
 
-    # Change the element to be of the form `(tile, metadataDictionary)`
-    # rather than `alldataDictionary`.
+    # Change the element to be of the form `(tile, metadataDictionary)` rather than `alldataDictionary`.
     tiles = tiles.map(lambda elem: (elem.pop("tile"), elem), **dataset_map_options)
 
     # apply preprocessing to tiles - resize, float conversion, preprocessing
@@ -2517,7 +2504,7 @@ def readExample(devices, strategy):
     batch_size = 128 * len(devices)
 
     batched_dist = strategy.experimental_distribute_dataset(tiles.batch(batch_size))
-    print("readExample: %f seconds" % (time.time() - tic))
+    print("read_example: %f seconds" % (time.time() - tic))
     return batched_dist
 
 
@@ -2527,7 +2514,7 @@ def predict(model, element):
     return model(element[0]), element[1]
 
 
-def predictExample(model, batched_dist, strategy):
+def predict_example(model, batched_dist, strategy):
     tic = time.time()
 
     # distributed inference, condensing distributed feature tensors, metadata dicts in lists
@@ -2554,11 +2541,11 @@ def predictExample(model, batched_dist, strategy):
         metadata[key] = tf.concat([meta[key] for meta in metadata_list], axis=0)
     del metadata_list
 
-    print("predictExample: %f seconds" % (time.time() - tic))
+    print("predict_example: %f seconds" % (time.time() - tic))
     return features, metadata
 
 
-def outputExample(features, metadata):
+def output_example(features, metadata):
     tic = time.time()
 
     # write features, metadata to disk
@@ -2569,19 +2556,17 @@ def outputExample(features, metadata):
             dtype=h5py.string_dtype(encoding="ascii"),
         )
         handle.create_dataset("features", data=features.numpy(), dtype="float")
-        handle.create_dataset(
-            "slideIdx", data=np.zeros(metadata["slide"].shape), dtype="int"
-        )
+        handle.create_dataset("slideIdx", data=np.zeros(metadata["slide"].shape), dtype="int")
         handle.create_dataset("x_centroid", data=metadata["tx"].numpy(), dtype="float")
         handle.create_dataset("y_centroid", data=metadata["ty"].numpy(), dtype="float")
         handle.create_dataset("dataIdx", data=np.zeros(1), dtype="int")
         handle.create_dataset("wsi_mean", data=np.zeros(3), dtype="float")
         handle.create_dataset("wsi_std", data=np.zeros(3), dtype="float")
 
-    print("outputExample: %f seconds" % (time.time() - tic))
+    print("output_example: %f seconds" % (time.time() - tic))
 
 
-def getLevelAndFactor(magnification, estimated, tolerance):
+def get_level_and_factor(magnification, estimated, tolerance):
     # calculate difference with magnification levels
     delta = magnification - estimated
 
@@ -2599,7 +2584,7 @@ def getLevelAndFactor(magnification, estimated, tolerance):
     return level, factor
 
 
-def py_ComputeReadParameters(filenameIn, magnificationIn, toleranceIn):
+def py_compute_read_parameters(filenameIn, magnificationIn, toleranceIn):
     filename = filenameIn.numpy().decode("utf-8")
     magnification = magnificationIn.numpy()
     tolerance = toleranceIn.numpy()
@@ -2615,7 +2600,7 @@ def py_ComputeReadParameters(filenameIn, magnificationIn, toleranceIn):
         estimated = np.array(objective / os_obj.level_downsamples)
 
         # Find best level to use and its factor
-        level, factor = getLevelAndFactor(magnification, estimated, tolerance)
+        level, factor = get_level_and_factor(magnification, estimated, tolerance)
 
         # get slide width, height at desired magnification. (Note width before height)
         width, height = os_obj.level_dimensions[level]
@@ -2632,14 +2617,10 @@ def py_ComputeReadParameters(filenameIn, magnificationIn, toleranceIn):
         estimated = np.array(objective / source_group.attrs["level_downsamples"])
 
         # Find best level to use and its factor
-        level, factor = getLevelAndFactor(magnification, estimated, tolerance)
+        level, factor = get_level_and_factor(magnification, estimated, tolerance)
 
-        if using_zarr_jpeg_package:
-            # get slide width, height at desired magnification. (Note positions of width and height)
-            width, height = source_group[format(level)].shape[1:3]
-        else:
-            # get slide width, height at desired magnification. (Note height before width)
-            height, width = source_group[format(level)].shape[0:2]
+        # get slide width, height at desired magnification. (Note height before width)
+        height, width = source_group[format(level)].shape[0:2]
 
     else:
         # We don't know magnifications so assume reasonable values for level and factor.
@@ -2656,82 +2637,129 @@ def py_ComputeReadParameters(filenameIn, magnificationIn, toleranceIn):
     return level, factor, width, height
 
 
-def tf_ComputeReadParameters(elem, tolerance=tf.constant(0.02, dtype=tf.float32)):
+def tf_compute_read_parameters(elem, tolerance=tf.constant(0.02, dtype=tf.float32)):
     level, factor, width, height = tf.py_function(
-        func=py_ComputeReadParameters,
+        func=py_compute_read_parameters,
         inp=[elem["filename"], elem["magnification"], tolerance],
         Tout=(tf.int32, tf.float32, tf.int32, tf.int32),
     )
     return {**elem, "level": level, "factor": factor, "width": width, "height": height}
 
 
-def tf_ComputeChunkPositions(elem):
+def tf_compute_chunk_positions(elem):
     zero = tf.constant(0, dtype=tf.int32)
     one = tf.constant(1, dtype=tf.int32)
-    chunkWidth = elem["cwf"] * (elem["tw"] - elem["ow"]) + elem["ow"]
-    chunkHeight = elem["chf"] * (elem["th"] - elem["oh"]) + elem["oh"]
+    chunk_width = elem["cwf"] * (elem["tw"] - elem["ow"]) + elem["ow"]
+    chunk_height = elem["chf"] * (elem["th"] - elem["oh"]) + elem["oh"]
 
-    # The left side of a tile cannot be as large as left_bound.  Also,
-    # the left side of a chunk cannot be as large as left_bound because
-    # chunks contain a whole number of tiles.
+    # The left side of a tile cannot be as large as left_bound.  Also, the left side of a chunk cannot
+    # be as large as left_bound because chunks contain a whole number of tiles.
     left_bound = tf.maximum(
         zero,
-        elem["width"] - elem["ow"]
-        if elem["fractional"]
-        else elem["width"] - elem["tw"] + one,
+        elem["width"] - elem["ow"] if elem["fractional"] else elem["width"] - elem["tw"] + one,
     )
-    chunkLeft = tf.range(zero, left_bound, chunkWidth - elem["ow"])
-    chunkRight = tf.clip_by_value(chunkLeft + chunkWidth, zero, elem["width"])
+    chunk_left = tf.range(zero, left_bound, chunk_width - elem["ow"])
+    chunk_right = tf.clip_by_value(chunk_left + chunk_width, zero, elem["width"])
 
     top_bound = tf.maximum(
         zero,
-        elem["height"] - elem["oh"]
-        if elem["fractional"]
-        else elem["height"] - elem["th"] + one,
+        elem["height"] - elem["oh"] if elem["fractional"] else elem["height"] - elem["th"] + one,
     )
-    chunkTop = tf.range(zero, top_bound, chunkHeight - elem["oh"])
-    chunkBottom = tf.clip_by_value(chunkTop + chunkHeight, zero, elem["height"])
+    chunk_top = tf.range(zero, top_bound, chunk_height - elem["oh"])
+    chunk_bottom = tf.clip_by_value(chunk_top + chunk_height, zero, elem["height"])
 
-    x = tf.tile(chunkLeft, tf.stack([tf.size(chunkTop)]))
-    w = tf.tile(chunkRight - chunkLeft, tf.stack([tf.size(chunkTop)]))
-    y = tf.repeat(chunkTop, tf.size(chunkLeft))
-    h = tf.repeat(chunkBottom - chunkTop, tf.size(chunkLeft))
-    len = tf.size(x)
+    cx = tf.tile(chunk_left, tf.stack([tf.size(chunk_top)]))
+    cw = tf.tile(chunk_right - chunk_left, tf.stack([tf.size(chunk_top)]))
+    cy = tf.repeat(chunk_top, tf.size(chunk_left))
+    ch = tf.repeat(chunk_bottom - chunk_top, tf.size(chunk_left))
+    len = tf.size(cx)
 
+    # If a mask was supplied, compute a mask for each chunk.  The size of a mask for a chunk will be
+    # chunk_width_factor by chunk_height_factor, even along the right or bottom border where it will be
+    # padded if necessary.
+    has_mask = "mask_wsi" in elem.keys()
+
+    mask_chunks = tf.TensorArray(dtype=tf.bool, size=len)
+    if has_mask:
+        mask_width = tf.shape(elem["mask_wsi"])[1]
+        mask_left = tf.cast(chunk_left / (elem["tw"] - elem["ow"]), dtype=tf.int32)
+        mask_right = tf.clip_by_value(mask_left + elem["cwf"], zero, mask_width)
+        mask_height = tf.shape(elem["mask_wsi"])[0]
+        mask_top = tf.cast(chunk_top / (elem["th"] - elem["oh"]), dtype=tf.int32)
+        mask_bottom = tf.clip_by_value(mask_top + elem["chf"], zero, mask_height)
+        mask_x = tf.tile(mask_left, tf.stack([tf.size(mask_top)]))
+        mask_w = tf.tile(mask_right - mask_left, tf.stack([tf.size(mask_top)]))
+        mask_y = tf.repeat(mask_top, tf.size(mask_left))
+        mask_h = tf.repeat(mask_bottom - mask_top, tf.size(mask_left))
+        len = tf.size(mask_x)
+
+        # mask_chunks = [elem["mask_wsi"][y:(y+h), x:(x+w)] for x, y, w, h in zip(mask_x, mask_w, mask_y, mask_h)]
+        condition = lambda i, _: tf.less(i, len)
+        body = lambda i, mask_chunks: (
+            i + 1,
+            mask_chunks.write(
+                i,
+                tf.image.crop_to_bounding_box(
+                    elem["mask_wsi"],
+                    tf.gather(mask_y, i),
+                    tf.gather(mask_x, i),
+                    tf.gather(mask_h, i),
+                    tf.gather(mask_w, i),
+                ),
+            ),
+        )
+        _, mask_chunks = tf.while_loop(condition, body, [0, mask_chunks])
+
+    mask_chunks = mask_chunks.stack()
     response = {}
     for key in elem.keys():
-        response[key] = tf.repeat(elem[key], len)
-    return {**response, "cx": x, "cy": y, "cw": w, "ch": h}
+        if key != "mask_wsi":
+            # Exclude mask_wsi because it is large and we now have mask_chunk.
+            response[key] = tf.repeat(elem[key], len)
+    response = {**response, "cx": cx, "cy": cy, "cw": cw, "ch": ch}
+    if has_mask:
+        response = {**response, "mask_chunk": mask_chunks}
+    return response
 
 
-def py_ReadChunk(filenameIn, level, x, y, w, h):
+def py_read_chunk(filenameIn, level, x, y, w, h):
     filename = filenameIn.numpy().decode("utf-8")
     if re.compile(r"\.svs$").search(filename):
-        if True:  # Should be True!!!
+        if True:
             # Use OpenSlide to read SVS image
             os_obj = os.OpenSlide(filename)
 
             # read chunk and convert to tensor
             chunk = np.array(
-                os_obj.read_region(
-                    (x.numpy(), y.numpy()), level.numpy(), (w.numpy(), h.numpy())
-                )
+                os_obj.read_region((x.numpy(), y.numpy()), level.numpy(), (w.numpy(), h.numpy()))
             )
+        elif True:
+            # Use fsspec to read the SVS image
+            # This is NOT working code!!!
+            with fsspec.open(filename) as store:
+                source_group = zarr.open(store, mode="r")
+                # Zarr formats other than using zarr-jpeg package have shape (height, width, colors)
+                # using order="C".
+                chunk = source_group[format(level.numpy())][
+                    y.numpy() : (y.numpy() + h.numpy()),
+                    x.numpy() : (x.numpy() + w.numpy()),
+                    :,
+                ]
         elif False:
-            # Use Zarr to read SVS image
+            # Read the SVS image with napari_lazy_openslide.lazy_openslide.OpenSlideStore
             store = OpenSlideStore(filename, tilesize=2048)
             source_group = zarr.open(store, mode="r")
-            ## Zarr formats other than zarr-jpeg have shape (height, width, colors) using order="C".
+            # Zarr formats other than zarr-jpeg have shape (height, width, colors) using order="C".
             chunk = source_group[format(level.numpy())][
                 y.numpy() : (y.numpy() + h.numpy()),
                 x.numpy() : (x.numpy() + w.numpy()),
                 :,
             ]
         else:
-            # Use tifffile to read SVS image 'aszarr'
+            # Use tifffile to read the SVS image 'aszarr'
             # store = tifffile.imread(filename)
             store = tifffile.imread(filename, aszarr=True)
-            # store = tifffile.imread(filename, aszarr=True, chunkmode='page')
+            # store = tifffile.imread(filename, aszarr=True, chunkmode="page")
             source_group = zarr.open(store, mode="r")
             chunk = source_group[format(level.numpy())][
                 y.numpy() : (y.numpy() + h.numpy()),
@@ -2743,24 +2771,14 @@ def py_ReadChunk(filenameIn, level, x, y, w, h):
         # `filename` is a directory that stores an image in Zarr format.
         store = zarr.DirectoryStore(filename)
         source_group = zarr.open(store, mode="r")
-        if using_zarr_jpeg_package:
-            ## Because using the zarr_jpeg package means we had to store the image using the transpose of the image
-            ## dimensions, we undo the transpose here.
-            chunk = np.transpose(
-                source_group[format(level.numpy())][
-                    :,
-                    x.numpy() : (x.numpy() + w.numpy()),
-                    y.numpy() : (y.numpy() + h.numpy()),
-                ]
-            )
-        else:
-            ## Zarr formats other than using zarr-jpeg package have shape (height, width, colors) using order="C".
-            chunk = source_group[format(level.numpy())][
-                y.numpy() : (y.numpy() + h.numpy()),
-                x.numpy() : (x.numpy() + w.numpy()),
-                :,
-            ]
-        ## Do chunk width and height need to be transposed to be consistent with SVS?!!!
+        # Zarr formats other than using zarr-jpeg package have shape (height, width, colors) using
+        # order="C".
+        chunk = source_group[format(level.numpy())][
+            y.numpy() : (y.numpy() + h.numpy()),
+            x.numpy() : (x.numpy() + w.numpy()),
+            :,
+        ]
+        # Do chunk width and height need to be transposed to be consistent with SVS?!!!
 
     else:
         pil_obj = Image.open(filename)
@@ -2768,74 +2786,99 @@ def py_ReadChunk(filenameIn, level, x, y, w, h):
             x.numpy() : (x.numpy() + w.numpy()), y.numpy() : (y.numpy() + h.numpy()), :
         ]
 
+    # Do we want to support other than uint8?!!!
     return tf.convert_to_tensor(chunk[..., :3], dtype=tf.uint8)
 
 
-def tf_ReadAndSplitChunk(elem):
-    zero = tf.constant(0, dtype=tf.int32)
-    one = tf.constant(1, dtype=tf.int32)
+def tf_read_and_split_chunk(elem):
+    zero8 = tf.constant(0, dtype=tf.uint8)
+    zero32 = tf.constant(0, dtype=tf.int32)
+    one8 = tf.constant(1, dtype=tf.uint8)
+    one32 = tf.constant(1, dtype=tf.int32)
+
     left_bound = tf.maximum(
-        zero,
-        elem["cw"] - elem["ow"]
-        if elem["fractional"]
-        else elem["cw"] - elem["tw"] + one,
+        zero32,
+        elem["cw"] - elem["ow"] if elem["fractional"] else elem["cw"] - elem["tw"] + one32,
     )
-    tileLeft = tf.range(zero, left_bound, elem["tw"] - elem["ow"])
-    tileRight = tf.clip_by_value(tileLeft + elem["tw"], zero, elem["cw"])
+    tile_left = tf.range(zero32, left_bound, elem["tw"] - elem["ow"])
+    tile_right = tf.clip_by_value(tile_left + elem["tw"], zero32, elem["cw"])
+    usable_mask_width = tf.size(tile_left)
 
     top_bound = tf.maximum(
-        zero,
-        elem["ch"] - elem["oh"]
-        if elem["fractional"]
-        else elem["ch"] - elem["th"] + one,
+        zero32,
+        elem["ch"] - elem["oh"] if elem["fractional"] else elem["ch"] - elem["th"] + one32,
     )
-    tileTop = tf.range(zero, top_bound, elem["th"] - elem["oh"])
-    tileBottom = tf.clip_by_value(tileTop + elem["th"], zero, elem["ch"])
+    tile_top = tf.range(zero32, top_bound, elem["th"] - elem["oh"])
+    tile_bottom = tf.clip_by_value(tile_top + elem["th"], zero32, elem["ch"])
+    usable_mask_height = tf.size(tile_top)
 
-    x = tf.tile(tileLeft, tf.stack([tf.size(tileTop)]))
-    w = tf.tile(tileRight - tileLeft, tf.stack([tf.size(tileTop)]))
-    y = tf.repeat(tileTop, tf.size(tileLeft))
-    h = tf.repeat(tileBottom - tileTop, tf.size(tileLeft))
+    x = tf.tile(tile_left, tf.stack([tf.size(tile_top)]))
+    w = tf.tile(tile_right - tile_left, tf.stack([tf.size(tile_top)]))
+    y = tf.repeat(tile_top, tf.size(tile_left))
+    h = tf.repeat(tile_bottom - tile_top, tf.size(tile_left))
     len = tf.size(x)
-
-    chunk = tf.py_function(
-        func=py_ReadChunk,
-        inp=[
-            elem["filename"],
-            elem["level"],
-            elem["cx"],
-            elem["cy"],
-            elem["cw"],
-            elem["ch"],
-        ],
-        Tout=tf.uint8,
-    )
-
     tiles = tf.TensorArray(dtype=tf.uint8, size=len)
-    condition = lambda i, _: tf.less(i, len)
-    body = lambda i, tiles: (
-        i + 1,
-        tiles.write(
-            i,
-            tf.image.crop_to_bounding_box(
-                chunk,
-                tf.gather(y, i),
-                tf.gather(x, i),
-                tf.gather(h, i),
-                tf.gather(w, i),
+
+    mask_chunk_supplied = "mask_chunk" in elem.keys()
+    if mask_chunk_supplied:
+        mask_chunk = elem["mask_chunk"]
+
+    # Handle the case that we need to read from disk
+    read_chunk = not mask_chunk_supplied or tf.math.reduce_any(mask_chunk)
+    if read_chunk:
+        chunk = tf.py_function(
+            func=py_read_chunk,
+            inp=[
+                elem["filename"],
+                elem["level"],
+                elem["cx"],
+                elem["cy"],
+                elem["cw"],
+                elem["ch"],
+            ],
+            Tout=tf.uint8,
+        )
+
+        condition = lambda i, _: tf.less(i, len)
+        body = lambda i, tiles: (
+            i + 1,
+            tiles.write(
+                i,
+                tf.image.crop_to_bounding_box(
+                    chunk,
+                    tf.gather(y, i),
+                    tf.gather(x, i),
+                    tf.gather(h, i),
+                    tf.gather(w, i),
+                ),
             ),
-        ),
-    )
-    _, tiles = tf.while_loop(condition, body, [0, tiles])
+        )
+        _, tiles = tf.while_loop(condition, body, [0, tiles])
+        del chunk
+
     tiles = tiles.stack()
-    del chunk
 
-    response = {}
+    # Figure out which tiles we are going to keep
+    if not read_chunk:
+        # Keep nothing
+        where = tf.where(tf.repeat(False, len))
+    elif mask_chunk_supplied:
+        # Use the supplied mask
+        where = tf.where(tf.reshape(mask_chunk[:usable_mask_height, :usable_mask_width, 0], [len,]))
+    else:
+        # Keep everything
+        where = tf.where(tf.repeat(True, len))
+    # Change shape from (tf.size(where), 1) to (tf.size(where),)
+    where = tf.reshape(where, [tf.size(where)])
+
+    # Construct the response
+    all_tiles = {}
     for key in elem.keys():
-        response[key] = tf.repeat(elem[key], len)
-
-    return {
-        **response,
+        if key != "mask_chunk":
+            # Exclude mask_chunk because it is useless at the tile level
+            all_tiles[key] = tf.repeat(elem[key], len)
+    all_tiles = {
+        **all_tiles,
         "tx": elem["cx"] + x,
         "ty": elem["cy"] + y,
         "tw": w,
@@ -2843,55 +2886,174 @@ def tf_ReadAndSplitChunk(elem):
         "tile": tiles,
     }
 
+    # Keep only the tiles that we want.  If we have read in the chunk and don't have mask_chunk supplied
+    # then there is nothing to do because we are keeping everything.
 
-def convertOpenSlideToChunks(
-    svsFilename,
-    chunksDirname,
-    chunksType="jpeg",
-    chunkFactor=8,
-    tileSize=256,
+    response = {}
+    for key in all_tiles.keys():
+        response[key] = tf.gather(all_tiles[key], where)
+
+    return response
+
+
+def py_compute_resampled_mask(
+    mask_filenameIn, widthIn, heightIn, cwfIn, chfIn, twIn, thIn, owIn, ohIn, fractionalIn
+):
+    mask_filename = mask_filenameIn.numpy().decode("utf-8")
+    width = widthIn.numpy()
+    height = heightIn.numpy()
+    cwf = cwfIn.numpy()
+    chf = chfIn.numpy()
+    tw = twIn.numpy()
+    th = thIn.numpy()
+    ow = owIn.numpy()
+    oh = ohIn.numpy()
+    fractional = fractionalIn.numpy()
+
+    left_bound = max(0, width - ow if fractional else width - tw + 1)
+    top_bound = max(0, height - oh if fractional else height - th + 1)
+
+    # Note that we are assuming that the process of downsampling (or upsampling) the mask to be one
+    # pixel per tile will take care of any aspects related to the overlapping of tiles.  Subsequent to
+    # that, we will not be looking at the mask pixels for adjacent tiles even though they may overlap
+    # with the tile being considered.
+
+    # Read in an ITK image from the supplied file name for the mask
+    mask = itk.imread(mask_filename)
+    mask_dimension = mask.GetImageDimension()
+    if mask_dimension != 2:
+        raise ValueError("The mask should be a 2-dimensional image.")
+
+    # Note that we are assuming that the mask will be downsampled (or upsampled) to have one whole pixel
+    # per tile, even if not every tile is whole; that is even if some are fractional tiles from the
+    # right or bottom edges.
+
+    # We use a formula with floor() rather than a formula with ceil() so that we get the same answer
+    # with float or integer division for the argument.
+    resampled_width = np.floor((left_bound - 1) / (tw - ow)) + 1
+    resampled_height = np.floor((top_bound - 1) / (th - oh)) + 1
+    resampled_size = (resampled_width, resampled_height)
+    mask_size = itk.size(mask)  # (width, height)
+    width_scale = resampled_width / mask_size[0]
+    height_scale = resampled_height / mask_size[1]
+    # Warn if width_scale is different from height_scale by more than about 20%.
+    print(f"width_scale = {width_scale}")
+    print(f"height_scale = {height_scale}")
+    if abs(math.log(width_scale / height_scale)) > 0.20:
+        raise ValueError("The mask aspect ratio does not match the image aspect ratio.")
+
+    if width_scale == 1 and height_scale == 1:
+        resampled = mask
+    else:
+        resampled_spacing = itk.spacing(mask) * itk.size(mask) / resampled_size
+        resampled_origin = itk.origin(mask) + (resampled_spacing - itk.spacing(mask)) * 0.5
+
+        interpolator = itk.NearestNeighborInterpolateImageFunction.New(mask)
+        resampled = itk.resample_image_filter(
+            mask,
+            interpolator=interpolator,
+            size=resampled_size,
+            output_spacing=resampled_spacing,
+            output_origin=resampled_origin,
+        )
+    del mask
+
+    # resampled has (width, height) index ordering.  resampled_numpy has (height, width) index ordering.
+    resampled_numpy = itk.array_from_image(resampled)
+    del resampled
+
+    # * At some point the mask gets broken up into chunks that are chunk_height_factor by
+    # chunk_width_factor; to make tensorflow happy, we make sure that the dimensions of the mask are
+    # multiples of those values.
+    # * Also, we reshape so that the mask has shape (padded_height, padded_width, channels) where
+    # channels = 1.
+    # * Also, we cast the array to type np.bool.  (Note that we use a formula with floor() rather than a
+    # formula with ceil() so that we get the same answer with float or integer division for the
+    # argument.)
+    padded_resampled_numpy = np.zeros(
+        (
+            int((np.floor((resampled_numpy.shape[0] - 1) / chf) + 1) * chf),
+            int((np.floor((resampled_numpy.shape[1] - 1) / cwf) + 1) * cwf),
+            1,
+        ),
+        dtype=np.bool,
+    )
+    padded_resampled_numpy[: resampled_numpy.shape[0], : resampled_numpy.shape[1], 0] = resampled_numpy
+    del resampled_numpy
+
+    print(f"padded_resampled_numpy.shape = {padded_resampled_numpy.shape}")
+    return padded_resampled_numpy
+
+
+def tf_compute_resampled_mask(elem):
+    if "mask_filename" in elem.keys():
+        mask_wsi = tf.py_function(
+            func=py_compute_resampled_mask,
+            inp=[
+                elem["mask_filename"],
+                elem["width"],
+                elem["height"],
+                elem["cwf"],
+                elem["chf"],
+                elem["tw"],
+                elem["th"],
+                elem["ow"],
+                elem["oh"],
+                elem["fractional"],
+            ],
+            Tout=tf.bool,
+        )
+        return {**elem, "mask_wsi": mask_wsi}
+    else:
+        return elem
+
+
+def convert_openslide_to_chunks(
+    svs_filename,
+    chunks_dirname,
+    chunks_type="jpeg",
+    chunk_factor=8,
+    tile_size=256,
     overlap=0,
     **kwargs,
 ):
-    assert isinstance(svsFilename, str)
-    assert isinstance(chunksDirname, str)
-    assert isinstance(chunksType, str)
-    assert isinstance(chunkFactor, int)
-    assert isinstance(tileSize, int)
+    assert isinstance(svs_filename, str)
+    assert isinstance(chunks_dirname, str)
+    assert isinstance(chunks_type, str)
+    assert isinstance(chunk_factor, int)
+    assert isinstance(tile_size, int)
     assert isinstance(overlap, int)
-    assert chunkFactor > 0
-    assert tileSize > overlap
+    assert chunk_factor > 0
+    assert tile_size > overlap
     assert overlap >= 0
-    makedirs(chunksDirname)
-    chunkSize = overlap + (tileSize - overlap) * chunkFactor
-    os_obj = os.OpenSlide(svsFilename)
+    makedirs(chunks_dirname)
+    chunk_size = overlap + (tile_size - overlap) * chunk_factor
+    os_obj = os.OpenSlide(svs_filename)
     level = 0
     width, height = os_obj.level_dimensions[level]
-    chunkLeft = range(0, width - tileSize + 1, chunkSize - overlap)
-    chunkRight = [min(left + chunkSize, width) for left in chunkLeft]
-    chunkTop = range(0, height - tileSize + 1, chunkSize - overlap)
-    chunkBottom = [min(top + chunkSize, height) for top in chunkTop]
-    for left, right in zip(chunkLeft, chunkRight):
-        for top, bottom in zip(chunkTop, chunkBottom):
+    chunk_left = range(0, width - tileSize + 1, chunk_size - overlap)
+    chunk_right = [min(left + chunk_size, width) for left in chunk_left]
+    chunk_top = range(0, height - tileSize + 1, chunk_size - overlap)
+    chunk_bottom = [min(top + chunk_size, height) for top in chunk_top]
+    for left, right in zip(chunk_left, chunk_right):
+        for top, bottom in zip(chunk_top, chunkBottom):
             # Read in chunk
-            chunk = np.array(
-                os_obj.read_region((left, top), level, (right - left, bottom - top))
-            )
+            chunk = np.array(os_obj.read_region((left, top), level, (right - left, bottom - top)))
             assert len(chunk.shape) == 3
             assert 3 <= chunk.shape[2] <= 4
             # Make sure that we have RGB rather than RGBA
             image = Image.fromarray(chunk[..., :3])
-            # Write out chunk using {chunksType} as file suffix to specify the type
-            filename = f"{chunksDirname}/{left}.{top}.{chunksType}"
+            # Write out chunk using {chunks_type} as file suffix to specify the type
+            filename = f"{chunks_dirname}/{left}.{top}.{chunks_type}"
             # print(filename)
             image.save(filename, **kwargs)
 
 
-# convertOpenSlideToChunks('TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs', 'jpeg95.stack', 'jpeg', quality=95)
-# convertOpenSlideToChunks('TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs', 'jpeg75.stack', 'jpeg', quality=75)
-# convertOpenSlideToChunks('TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs', 'jpeg50.stack', 'jpeg', quality=50)
-# convertOpenSlideToChunks('TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs', 'jpeg25.stack', 'jpeg', quality=25)
-# convertOpenSlideToChunks('TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs', 'jpeg2000.stack', 'jpeg2000')
-# convertOpenSlideToChunks('TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs', 'j2k.stack', 'j2k')
-# convertOpenSlideToChunks('TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs', 'jpx.stack', 'jpx')
-# convertOpenSlideToChunks('TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs', 'png.stack', 'png')
+# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg95.stack", "jpeg", quality=95)
+# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg75.stack", "jpeg", quality=75)
+# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg50.stack", "jpeg", quality=50)
+# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg25.stack", "jpeg", quality=25)
+# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg2000.stack", "jpeg2000")
+# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "j2k.stack", "j2k")
+# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpx.stack", "jpx")
+# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "png.stack", "png")
