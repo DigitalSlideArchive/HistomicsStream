@@ -24,9 +24,14 @@ import tifffile
 import time
 import zarr
 
-"""Instead of the zarr_jpeg package we use this jpeg codec.  The former collapses dimensions by default,
-can require us to transpose dimensions, and can miss optimizations based upon RGB data.  Instead we use
-this vanilla jpeg codec.
+"""
+
+Definitions of codecs:
+
+For the code that uses Zarr data storage for jpeg images, we need to supply codecs.  Note that we use
+these codecs instead of those available from the zarr_jpeg package.  The latter collapses dimensions by
+default, can require us to transpose dimensions, and can miss optimizations based upon RGB data.
+
 """
 
 
@@ -60,9 +65,6 @@ class jpeg(Codec):
 
 register_codec(jpeg)
 
-"""Similar to the JPEG codec above, we want a JPEG2K codec
-"""
-
 
 class jpeg2k(Codec):
     """Codec providing jpeg2k compression via imagecodecs.
@@ -95,6 +97,622 @@ class jpeg2k(Codec):
 register_codec(jpeg2k)
 
 
+"""
+
+Definitions of callable classes that can be supplied to tensorflow:
+
+Note that the __init__ function in these classes cannot be decorated with `@tf.function` for reasons
+that are not clear, but might (or might not!) be because an instance of a class (returned by the
+__init__ method) is not a tensorflow object.
+
+"""
+
+"""
+
+tfdHeader: An instance of class `tfdHeader` can be cast to `dict` and supplied to
+`tensorflow.data.Dataset.from_tensor_slices` to create an instance of a tensorflow dataset object.  The
+primary functionality of this class over an ordinary dictionary is that (1) it requires all the named
+keys, (2) it ensures that each value is a list or tuple, and (3) it expands any length-one lists to be
+the same length as the number of supplied filenames.  Additional error checking could be added.
+
+"""
+
+
+class tfdHeader:
+    def __init__(self, slides, filenames, cases, magnifications, read_modes, mask_filenames):
+        self.dictionary = {
+            "slide": slides,
+            "filename": filenames,
+            "case": cases,
+            "magnification": magnifications,
+            "read_mode": read_modes,
+            "mask_filename": mask_filenames,
+        }
+        # Convert an entry to a list if it is not already a list or tuple
+        for key in self.dictionary.keys():
+            if not isinstance(self.dictionary[key], (list, tuple)):
+                self.dictionary[key] = [
+                    self.dictionary[key],
+                ]
+        # Make all singleton values have the same length as `filenames`
+        if len(filenames) != 1:
+            for key in self.dictionary.keys():
+                if key != "filename" and len(self.dictionary[key]) == 1:
+                    self.dictionary[key] = self.dictionary[key] * len(filenames)
+
+    # Because it has the `keys` and `__getitem__` methods, this class can be cast to a Python `dict`.
+    def keys(self):
+        return self.dictionary.keys()
+
+    def __getitem__(self, key):
+        return self.dictionary[key]
+
+
+"""
+
+tfdNoOp: An instance of class `tfdNoOp` can be supplied as an argument to `tensorflow.dataset.map`.  It
+is a "no operation" callable that accepts a single argument.
+
+"""
+
+
+class tfdNoOp:
+    @tf.function
+    def __call__(self, elem):
+        return elem
+
+
+"""
+
+tfdPrint: An instance of class `tfdPrint` can be supplied as an argument to `tensorflow.dataset.map`.
+Like `tfdNoOp`, it is a "no operation" callable that accepts a single argument, though it has side
+effects in that it prints.  It demonstrates that tensorflow graph functionality is working by printing
+at tensorflow-graph trace time and at tensorflow-graph run time.  It also demonstrates that tensorflow
+graph functionality is properly handling the information flow from __init__ to __call__.
+
+"""
+
+
+class tfdPrint:
+    # @tf.function
+    def __init__(self, member):
+        self.member = member
+        tf.print("Running tfdPrint.__init__, with member = ", self.member)
+        print("Tracing tfdPrint.__init__")
+
+    @tf.function
+    def __call__(self, elem):
+        tf.print("Running tfdPrint.__call__, with member = ", self.member)
+        print("Tracing tfdPrint.__call__")
+        return elem
+
+
+"""
+
+ComputeReadParameters: An instance of class ComputeReadParameters can be supplied as an argument to
+`tensorflow.dataset.map`.  ComputeReadParameters computes `level`, `factor`, `width`, and `height` from
+the inputs `filename`, `magnification`, and `tolerance`.  ComputeReadParameters adds new key-value pairs
+to the tensorflow dictionary for the newly computed values.  Ideally the implementation would be all
+`tf.function` (i.e., a tensorflow graph function); however, much of the code is via a tensorflow
+`py_function` because our current implementation for discerning the size of an image without reading in
+the pixel values uses non-tensorflow packages, such as `openslide`.
+
+"""
+
+
+class ComputeReadParameters:
+    def __init__(self, tolerance=tf.constant(0.02, dtype=tf.float32)):
+        self.tolerance = tolerance
+
+    @tf.function
+    def __call__(self, elem):
+        level, factor, width, height = tf.py_function(
+            func=self._py_compute_read_parameters,
+            inp=[elem["filename"], elem["magnification"], self.tolerance],
+            Tout=(tf.int32, tf.float32, tf.int32, tf.int32),
+        )
+        response = {**elem, "level": level, "factor": factor, "width": width, "height": height}
+        return response
+
+    def _py_compute_read_parameters(self, filenameIn, magnificationIn, toleranceIn):
+        filename = filenameIn.numpy().decode("utf-8")
+        magnification = magnificationIn.numpy()
+        tolerance = toleranceIn.numpy()
+
+        if re.compile(r"\.svs$").search(filename):
+            # read whole-slide image file and create openslide object
+            os_obj = os.OpenSlide(filename)
+
+            # measure objective of level 0
+            objective = np.float32(os_obj.properties[os.PROPERTY_NAME_OBJECTIVE_POWER])
+
+            # calculate magnifications of levels
+            estimated = np.array(objective / os_obj.level_downsamples)
+
+            # Find best level to use and its factor
+            level, factor = self._get_level_and_factor(magnification, estimated, tolerance)
+
+            # get slide width, height at desired magnification. (Note width before height)
+            width, height = os_obj.level_dimensions[level]
+
+        elif re.compile(r"\.zarr$").search(filename):
+            # read whole-slide image and create zarr objects
+            store = zarr.DirectoryStore(filename)
+            source_group = zarr.open(store, mode="r")
+
+            # measure objective of level 0
+            objective = np.float32(source_group.attrs[os.PROPERTY_NAME_OBJECTIVE_POWER])
+
+            # calculate magnifications of levels
+            estimated = np.array(objective / source_group.attrs["level_downsamples"])
+
+            # Find best level to use and its factor
+            level, factor = self._get_level_and_factor(magnification, estimated, tolerance)
+
+            # get slide width, height at desired magnification. (Note height before width)
+            height, width = source_group[format(level)].shape[0:2]
+
+        else:
+            # We don't know magnifications so assume reasonable values for level and factor.
+            level = 0
+            factor = 1.0
+            if True:
+                pil_obj = Image.open(filename)
+                width, height = pil_obj.size
+            else:
+                # For the case that we know the image size without opening the file
+                width, height = 2048, 2048
+
+        print(f"level = {level}, factor = {factor}, width = {width}, height = {height}")
+        return level, factor, width, height
+
+    def _get_level_and_factor(self, magnification, estimated, tolerance):
+        # calculate difference with magnification levels
+        delta = magnification - estimated
+
+        # match to existing levels
+        if np.min(np.abs(np.divide(delta, magnification))) < tolerance:  # match
+            level = np.squeeze(np.argmin(np.abs(delta)))
+            factor = 1.0
+        elif np.any(delta < 0):
+            value = np.max(delta[delta < 0])
+            level = np.squeeze(np.argwhere(delta == value)[0])
+            factor = magnification / estimated[level]
+        else:  # desired magnification above base level - throw error
+            raise ValueError("Cannot interpolate above scan magnification.")
+
+        return level, factor
+
+
+"""
+
+AddTileDescription: An instance of class AddTileDescription can be supplied as an argument to
+`tensorflow.dataset.map`.  AddTileDescription adds new key-value pairs to the tensorflow dictionary to
+set the desired tile width, height, width overlap, and height overlap for each element, and to indicate
+whether we want tiles even if they are fractional (aka of truncated size) due to partially falling off
+the edge of the image.  (These fractional tiles can be problematic because tensorflow likes its shapes
+to be uniform.)  chunk_width_factor and chunk_height_factor indicate how many tiles are read at a time.
+The primary functionality of this class over an ordinary dictionary is that it sets all the required
+keys and no others.
+
+"""
+
+
+class AddTileDescription:
+    def __init__(
+        self,
+        tile_width=tf.constant(256, dtype=tf.int32),
+        tile_height=tf.constant(256, dtype=tf.int32),
+        overlap_width=tf.constant(0, dtype=tf.int32),
+        overlap_height=tf.constant(0, dtype=tf.int32),
+        chunk_width_factor=tf.constant(8, dtype=tf.int32),
+        chunk_height_factor=tf.constant(8, dtype=tf.int32),
+        fractional=tf.constant(False, dtype=tf.bool),
+    ):
+        self.dictionary = {
+            "tw": tile_width,
+            "th": tile_height,
+            "ow": overlap_width,
+            "oh": overlap_height,
+            "cwf": chunk_width_factor,
+            "chf": chunk_height_factor,
+            "fractional": fractional,
+        }
+
+    @tf.function
+    def __call__(self, elem):
+        return {**elem, **self.dictionary}
+
+
+"""
+
+ComputeResampledMask: An instance of class ComputeResampledMask can be supplied as an argument to
+`tensorflow.dataset.map`.  ComputeResampledMask reads in a supplied mask and upsamples or downsamples it
+if necessary so that there is exactly one pixel in the mask for each tile in the input image.  Note that
+we are assuming that this will take care of any aspects related to the overlapping of tiles.  Subsequent
+to that, we will not be looking at the mask pixels for adjacent tiles even though they may overlap with
+the tile being considered.  Note further that we are assuming that the mask will be downsampled (or
+upsampled) to have one whole pixel per tile, even if not every tile is whole; that is even if some are
+fractional tiles from the right or bottom edges.
+
+"""
+
+
+class ComputeResampledMask:
+    @tf.function
+    def __call__(self, elem):
+        if "mask_filename" in elem.keys():
+            mask_wsi = tf.py_function(
+                func=self._py_compute_resampled_mask,
+                inp=[
+                    elem["mask_filename"],
+                    elem["width"],
+                    elem["height"],
+                    elem["cwf"],
+                    elem["chf"],
+                    elem["tw"],
+                    elem["th"],
+                    elem["ow"],
+                    elem["oh"],
+                    elem["fractional"],
+                ],
+                Tout=tf.bool,
+            )
+            return {**elem, "mask_wsi": mask_wsi}
+        else:
+            return elem
+
+    def _py_compute_resampled_mask(
+        self, mask_filenameIn, widthIn, heightIn, cwfIn, chfIn, twIn, thIn, owIn, ohIn, fractionalIn
+    ):
+        mask_filename = mask_filenameIn.numpy().decode("utf-8")
+        width = widthIn.numpy()
+        height = heightIn.numpy()
+        cwf = cwfIn.numpy()
+        chf = chfIn.numpy()
+        tw = twIn.numpy()
+        th = thIn.numpy()
+        ow = owIn.numpy()
+        oh = ohIn.numpy()
+        fractional = fractionalIn.numpy()
+
+        left_bound = max(0, width - ow if fractional else width - tw + 1)
+        top_bound = max(0, height - oh if fractional else height - th + 1)
+
+        # Read in an image from the supplied file name for the mask
+        mask_itk = itk.imread(mask_filename)
+        if mask_itk.GetImageDimension() != 2:
+            raise ValueError("The mask should be a 2-dimensional image.")
+        mask = tf.constant(itk.array_from_image(mask_itk))
+        # Add batch and channels dimensions
+        mask = mask[tf.newaxis, ..., tf.newaxis]
+        # The new size is one pixel per tile
+        resampled_width = int(np.floor((left_bound - 1) / (tw - ow)) + 1)
+        resampled_height = int(np.floor((top_bound - 1) / (th - oh)) + 1)
+        if abs(math.log((resampled_width / mask.shape[2]) / (resampled_height / mask.shape[1]))) > 0.20:
+            raise ValueError("The mask aspect ratio does not match the image aspect ratio.")
+        resampled_shape = (resampled_height, resampled_width)
+        # Perform the resampling
+        resampled = tf.image.resize(mask, resampled_shape)[0, ...]
+
+        # * At some point the mask gets broken up into chunks that are chunk_height_factor by
+        # chunk_width_factor; to make tensorflow happy, we make sure that the dimensions of the mask are
+        # multiples of those values.
+        # * Also, we reshape so that the mask has shape (padded_height, padded_width, channels) where
+        # channels = 1.
+        # * Also, we cast the array to type np.bool.  (Note that we use a formula with floor() rather than a
+        # formula with ceil() so that we get the same answer with float or integer division for the
+        # argument.)
+        padded_resampled = np.zeros(
+            (
+                int((tf.math.floor((resampled_shape[0] - 1) / chf) + 1) * chf),
+                int((tf.math.floor((resampled_shape[1] - 1) / cwf) + 1) * cwf),
+                1,
+            ),
+            dtype=np.bool,
+        )
+        padded_resampled[
+            : resampled_shape[0],
+            : resampled_shape[1],
+            :1,
+        ] = resampled
+        del resampled
+
+        # print(f"resampled_shape = {resampled_shape}")
+        # print(f"padded_resampled.shape = {padded_resampled.shape}")
+        # tf.print(padded_resampled[:8,:8,0])
+        return padded_resampled
+
+
+"""
+
+ComputeChunkPositions: An instance of class ComputeChunkPositions can be supplied as an argument to
+`tensorflow.dataset.map`.  ComputeChunkPositions figures out what the read chunks will be based upon the
+tile parameters (size, overlap, fractional).  It divvys up the mask into pieces corresponding to the
+read chunks.  Note that it is important to subsequently call `.unbatch()` when it is desired that the
+chunks be not batched by slide.
+
+"""
+
+
+class ComputeChunkPositions:
+    @tf.function
+    def __call__(self, elem):
+        zero = tf.constant(0, dtype=tf.int32)
+        one = tf.constant(1, dtype=tf.int32)
+        chunk_width = elem["cwf"] * (elem["tw"] - elem["ow"]) + elem["ow"]
+        chunk_height = elem["chf"] * (elem["th"] - elem["oh"]) + elem["oh"]
+
+        # The left side of a tile cannot be as large as left_bound.  Also, the left side of a chunk cannot
+        # be as large as left_bound because chunks contain a whole number of tiles.
+        left_bound = tf.maximum(
+            zero,
+            elem["width"] - elem["ow"] if elem["fractional"] else elem["width"] - elem["tw"] + one,
+        )
+        chunk_left = tf.range(zero, left_bound, chunk_width - elem["ow"])
+        chunk_right = tf.clip_by_value(chunk_left + chunk_width, zero, elem["width"])
+
+        top_bound = tf.maximum(
+            zero,
+            elem["height"] - elem["oh"] if elem["fractional"] else elem["height"] - elem["th"] + one,
+        )
+        chunk_top = tf.range(zero, top_bound, chunk_height - elem["oh"])
+        chunk_bottom = tf.clip_by_value(chunk_top + chunk_height, zero, elem["height"])
+
+        cx = tf.tile(chunk_left, tf.stack([tf.size(chunk_top)]))
+        cw = tf.tile(chunk_right - chunk_left, tf.stack([tf.size(chunk_top)]))
+        cy = tf.repeat(chunk_top, tf.size(chunk_left))
+        ch = tf.repeat(chunk_bottom - chunk_top, tf.size(chunk_left))
+        len = tf.size(cx)
+
+        # If a mask was supplied, compute a mask for each chunk.  The size of a mask for a chunk will be
+        # chunk_width_factor by chunk_height_factor, even along the right or bottom border where it will be
+        # padded if necessary.
+        has_mask = "mask_wsi" in elem.keys()
+
+        mask_chunks = tf.TensorArray(dtype=tf.bool, size=len)
+        if has_mask:
+            mask_width = tf.shape(elem["mask_wsi"])[1]
+            mask_left = tf.cast(chunk_left / (elem["tw"] - elem["ow"]), dtype=tf.int32)
+            mask_right = tf.clip_by_value(mask_left + elem["cwf"], zero, mask_width)
+            mask_height = tf.shape(elem["mask_wsi"])[0]
+            mask_top = tf.cast(chunk_top / (elem["th"] - elem["oh"]), dtype=tf.int32)
+            mask_bottom = tf.clip_by_value(mask_top + elem["chf"], zero, mask_height)
+            mask_x = tf.tile(mask_left, tf.stack([tf.size(mask_top)]))
+            mask_w = tf.tile(mask_right - mask_left, tf.stack([tf.size(mask_top)]))
+            mask_y = tf.repeat(mask_top, tf.size(mask_left))
+            mask_h = tf.repeat(mask_bottom - mask_top, tf.size(mask_left))
+            len = tf.size(mask_x)
+
+            # mask_chunks = [elem["mask_wsi"][y:(y+h), x:(x+w)] for x, y, w, h in zip(mask_x, mask_w, mask_y, mask_h)]
+            condition = lambda i, _: tf.less(i, len)
+            body = lambda i, mask_chunks: (
+                i + 1,
+                mask_chunks.write(
+                    i,
+                    tf.image.crop_to_bounding_box(
+                        elem["mask_wsi"],
+                        tf.gather(mask_y, i),
+                        tf.gather(mask_x, i),
+                        tf.gather(mask_h, i),
+                        tf.gather(mask_w, i),
+                    ),
+                ),
+            )
+            _, mask_chunks = tf.while_loop(condition, body, [0, mask_chunks])
+
+        mask_chunks = mask_chunks.stack()
+        response = {}
+        for key in elem.keys():
+            if key != "mask_wsi":
+                # Exclude mask_wsi because it is large and we now have mask_chunk.
+                response[key] = tf.repeat(elem[key], len)
+        response = {**response, "cx": cx, "cy": cy, "cw": cw, "ch": ch}
+        if has_mask:
+            response = {**response, "mask_chunk": mask_chunks}
+        return response
+
+
+"""
+
+ReadAndSplitChunk: An instance of class ReadAndSplitChunk can be supplied as an argument to
+`tensorflow.dataset.map`.  ReadAndSplitChunk reads in each chunk (unless no tile from the chunk is
+needed due to the mask), and then splits it into tile, retaining only those tiles indicated by them
+mask.  Note that it is important to subsequently call `.unbatch()` when it is desired that the tiles be
+not batched by chunk.
+
+"""
+
+
+class ReadAndSplitChunk:
+    @tf.function
+    def __call__(self, elem):
+        zero8 = tf.constant(0, dtype=tf.uint8)
+        zero32 = tf.constant(0, dtype=tf.int32)
+        one8 = tf.constant(1, dtype=tf.uint8)
+        one32 = tf.constant(1, dtype=tf.int32)
+
+        left_bound = tf.maximum(
+            zero32,
+            elem["cw"] - elem["ow"] if elem["fractional"] else elem["cw"] - elem["tw"] + one32,
+        )
+        tile_left = tf.range(zero32, left_bound, elem["tw"] - elem["ow"])
+        tile_right = tf.clip_by_value(tile_left + elem["tw"], zero32, elem["cw"])
+        usable_mask_width = tf.size(tile_left)
+
+        top_bound = tf.maximum(
+            zero32,
+            elem["ch"] - elem["oh"] if elem["fractional"] else elem["ch"] - elem["th"] + one32,
+        )
+        tile_top = tf.range(zero32, top_bound, elem["th"] - elem["oh"])
+        tile_bottom = tf.clip_by_value(tile_top + elem["th"], zero32, elem["ch"])
+        usable_mask_height = tf.size(tile_top)
+
+        x = tf.tile(tile_left, tf.stack([tf.size(tile_top)]))
+        w = tf.tile(tile_right - tile_left, tf.stack([tf.size(tile_top)]))
+        y = tf.repeat(tile_top, tf.size(tile_left))
+        h = tf.repeat(tile_bottom - tile_top, tf.size(tile_left))
+        len = tf.size(x)
+        tiles = tf.TensorArray(dtype=tf.uint8, size=len)
+
+        mask_chunk_supplied = "mask_chunk" in elem.keys()
+        if mask_chunk_supplied:
+            mask_chunk = elem["mask_chunk"]
+
+        # Handle the case that we need to read from disk
+        read_chunk = not mask_chunk_supplied or tf.math.reduce_any(mask_chunk)
+        if read_chunk:
+            chunk = tf.py_function(
+                func=self._py_read_chunk,
+                inp=[
+                    elem["filename"],
+                    elem["level"],
+                    elem["cx"],
+                    elem["cy"],
+                    elem["cw"],
+                    elem["ch"],
+                ],
+                Tout=tf.uint8,
+            )
+
+            condition = lambda i, _: tf.less(i, len)
+            body = lambda i, tiles: (
+                i + 1,
+                tiles.write(
+                    i,
+                    tf.image.crop_to_bounding_box(
+                        chunk,
+                        tf.gather(y, i),
+                        tf.gather(x, i),
+                        tf.gather(h, i),
+                        tf.gather(w, i),
+                    ),
+                ),
+            )
+            _, tiles = tf.while_loop(condition, body, [0, tiles])
+            del chunk
+
+        tiles = tiles.stack()
+
+        # Figure out which tiles we are going to keep
+        if not read_chunk:
+            # Keep nothing
+            where = tf.where(tf.repeat(False, len))
+        elif mask_chunk_supplied:
+            # Use the supplied mask
+            where = tf.where(
+                tf.reshape(
+                    mask_chunk[:usable_mask_height, :usable_mask_width, 0],
+                    [
+                        len,
+                    ],
+                )
+            )
+        else:
+            # Keep everything
+            where = tf.where(tf.repeat(True, len))
+        # Change shape from (tf.size(where), 1) to (tf.size(where),)
+        where = tf.reshape(where, [tf.size(where)])
+
+        # Construct the response
+        all_tiles = {}
+        for key in elem.keys():
+            if key != "mask_chunk":
+                # Exclude mask_chunk because it is useless at the tile level
+                all_tiles[key] = tf.repeat(elem[key], len)
+        all_tiles = {
+            **all_tiles,
+            "tx": elem["cx"] + x,
+            "ty": elem["cy"] + y,
+            "tw": w,
+            "th": h,
+            "tile": tiles,
+        }
+
+        # Keep only the tiles that we want.  If we have read in the chunk and don't have mask_chunk supplied
+        # then there is nothing to do because we are keeping everything.
+
+        response = {}
+        for key in all_tiles.keys():
+            response[key] = tf.gather(all_tiles[key], where)
+
+        return response
+
+    def _py_read_chunk(self, filenameIn, level, x, y, w, h):
+        filename = filenameIn.numpy().decode("utf-8")
+        if re.compile(r"\.svs$").search(filename):
+            if True:
+                # Use OpenSlide to read SVS image
+                os_obj = os.OpenSlide(filename)
+
+                # read chunk and convert to tensor
+                chunk = np.array(
+                    os_obj.read_region((x.numpy(), y.numpy()), level.numpy(), (w.numpy(), h.numpy()))
+                )
+            elif True:
+                # Use fsspec to read the SVS image
+                # This is NOT working code!!!
+                with fsspec.open(filename) as store:
+                    source_group = zarr.open(store, mode="r")
+                    # Zarr formats other than using zarr-jpeg package have shape (height, width, colors)
+                    # using order="C".
+                    chunk = source_group[format(level.numpy())][
+                        y.numpy() : (y.numpy() + h.numpy()),
+                        x.numpy() : (x.numpy() + w.numpy()),
+                        :,
+                    ]
+            elif False:
+                # Read the SVS image with napari_lazy_openslide.lazy_openslide.OpenSlideStore
+                store = OpenSlideStore(filename, tilesize=2048)
+                source_group = zarr.open(store, mode="r")
+                # Zarr formats other than zarr-jpeg have shape (height, width, colors) using order="C".
+                chunk = source_group[format(level.numpy())][
+                    y.numpy() : (y.numpy() + h.numpy()),
+                    x.numpy() : (x.numpy() + w.numpy()),
+                    :,
+                ]
+            else:
+                # Use tifffile to read the SVS image 'aszarr'
+                # store = tifffile.imread(filename)
+                store = tifffile.imread(filename, aszarr=True)
+                # store = tifffile.imread(filename, aszarr=True, chunkmode="page")
+                source_group = zarr.open(store, mode="r")
+                chunk = source_group[format(level.numpy())][
+                    y.numpy() : (y.numpy() + h.numpy()),
+                    x.numpy() : (x.numpy() + w.numpy()),
+                    :,
+                ]
+
+        elif re.compile(r"\.zarr$").search(filename):
+            # `filename` is a directory that stores an image in Zarr format.
+            store = zarr.DirectoryStore(filename)
+            source_group = zarr.open(store, mode="r")
+            # Zarr formats other than using zarr-jpeg package have shape (height, width, colors) using
+            # order="C".
+            chunk = source_group[format(level.numpy())][
+                y.numpy() : (y.numpy() + h.numpy()),
+                x.numpy() : (x.numpy() + w.numpy()),
+                :,
+            ]
+            # Do chunk width and height need to be transposed to be consistent with SVS?!!!
+
+        else:
+            pil_obj = Image.open(filename)
+            chunk = np.asarray(pil_obj)[
+                x.numpy() : (x.numpy() + w.numpy()), y.numpy() : (y.numpy() + h.numpy()), :
+            ]
+
+        # Do we want to support other than uint8?!!!
+        return tf.convert_to_tensor(chunk[..., :3], dtype=tf.uint8)
+
+
+"""
+
+Helper functions functions for the examples that follow them.
+
+"""
+
+
 def _merge_dist_tensor(strategy, distributed, axis=0):
     # check if input is type produced by distributed.Strategy.run
     if isinstance(distributed, tf.python.distribute.values.PerReplica):
@@ -111,6 +729,13 @@ def _merge_dist_dict(strategy, distributed, axis=0):
         return distributed
     else:
         raise ValueError("Input to _merge_dist_tensor not a dict.")
+
+
+"""
+
+Example functions that carry out various parts of a typical tensorflow pipeline.
+
+"""
 
 
 def strategy_example():
@@ -133,31 +758,6 @@ def strategy_example():
 
     print("strategy_example: %f seconds" % (time.time() - tic))
     return devices, strategy, model
-
-
-def random_mask(shape):  # ITK order: (width, height)
-    # Here we will make a mask with random 0 and 1 values as a demonstration.
-    MaskDimension = 2
-    MaskPixelType = itk.UC
-    MaskImageType = itk.Image[MaskPixelType, MaskDimension]
-    mask_index = itk.Index[MaskDimension]()
-    mask_index.Fill(0)
-    mask_size = itk.Size[MaskDimension]()
-    mask_size[0] = shape[0]  # width
-    mask_size[1] = shape[1]  # height
-    mask_region = itk.ImageRegion[MaskDimension]()
-    mask_region.SetIndex(mask_index)
-    mask_region.SetSize(mask_size)
-    mask_image = MaskImageType.New()
-    mask_image.SetRegions(mask_region)
-    mask_image.Allocate()
-    random.seed("20210311", version=2)
-    for y in range(mask_size[1]):
-        for x in range(mask_size[0]):
-            # Use numpy index order on left-hand side
-            mask_image[y, x] = random.randrange(0, 2)
-
-    return mask_image
 
 
 def read_example(devices, strategy):
@@ -2416,67 +3016,62 @@ def read_example(devices, strategy):
 
     # We will use a mask to determine which tiles of the slide to process.  In this example we will
     # build the mask name from the WSI file name, by inserting "-mask" and changing the file type to
-    # "png", but generally any file name and file type that we can read as an image will do.
+    # "png", but generally any file name and any file type that we can read as an image will do.
 
     all_masks = [re.sub(r"^(.*)\.([^\.]*)$", r"\1-mask.png", wsi) for wsi in all_wsi_images]
     print(f"all_masks = {all_masks}")
 
-    # Give names for these slides
-    all_slides = ["TCGA-BH-A0BZ-01Z-00-DX1" for x in range(len(all_wsi_images))]
+    header = dict(
+        tfdHeader(
+            slides="TCGA-BH-A0BZ-01Z-00-DX1",
+            filenames=all_wsi_images,
+            cases="TCGA-BH-A0BZ",
+            magnifications=20.0,
+            read_modes="tiled",
+            mask_filenames=all_masks,
+        )
+    )
 
-    header = {
-        "slide": all_slides,
-        "filename": all_wsi_images,
-        "case": ["TCGA-BH-A0BZ" for x in range(len(all_wsi_images))],
-        "magnification": [20.0 for x in range(len(all_wsi_images))],
-        "read_mode": ["tiled" for x in range(len(all_wsi_images))],
-        "mask_filename": all_masks,
-    }
     tiles = tf.data.Dataset.from_tensor_slices(header)
 
     # For the desired magnification, find the best level stored in the image file, and its associated
     # factor, width, and height.
-    tiles = tiles.map(tf_compute_read_parameters)
+    compute_read_parameters = ComputeReadParameters()
+    tiles = tiles.map(compute_read_parameters)
 
-    # We are going to use a regularly spaced tiling for each of our dataset elements.  To begin, set the
-    # desired tile width, height, width overlap, and height overlap for each element, and indicate
-    # whether we want tiles even if they are fractional (aka of truncated size) due to partially falling
-    # off the edge of the image.  (These fractional tiles can be problematic because tensorflow likes
-    # its shapes to be uniform.)
-    tile_width = tf.constant(256, dtype=tf.int32)
-    tile_height = tile_width
-    overlap_width = tf.constant(0, dtype=tf.int32)
-    overlap_height = overlap_width
-    # (chunk_width_factor, chunk_height_factor) indicates how many
-    # (overlapping) tiles are read at a time.
-    chunk_width_factor = tf.constant(8, dtype=tf.int32)
-    chunk_height_factor = tf.constant(8, dtype=tf.int32)
-    fractional = tf.constant(False, dtype=tf.bool)
-    new_fields = {
-        "tw": tile_width,
-        "th": tile_height,
-        "ow": overlap_width,
-        "oh": overlap_height,
-        "cwf": chunk_width_factor,
-        "chf": chunk_height_factor,
-        "fractional": fractional,
-    }
-    tiles = tiles.map(lambda elem: {**elem, **new_fields})
+    # Specify size, overlap, etc. information about the tiles that we want to analyze.
+    add_tile_description = AddTileDescription()
+    tiles = tiles.map(add_tile_description)
 
     # If there are any then read in the masks, one per slide, that specify tile selction.  If they are
     # not already then downsample (or upsample) the masks to be one pixel per tile.
-    tiles = tiles.map(tf_compute_resampled_mask, **dataset_map_options)
+    compute_resampled_mask = ComputeResampledMask()
+    tiles = tiles.map(compute_resampled_mask, **dataset_map_options)
 
     # Split each element (e.g. each slide) into a batch of multiple rows, one per chunk to be read.
     # Note that the width `cw` or height `ch` of a row (chunk) may decreased from the requested value if
     # a chunk is near the edge of an image.  Note that it is important to call `.unbatch()` when it is
     # desired that the chunks be not batched by slide.
-    tiles = tiles.map(tf_compute_chunk_positions, **dataset_map_options).unbatch()
+    compute_chunk_positions = ComputeChunkPositions()
+    tiles = (
+        tiles.map(compute_chunk_positions, **dataset_map_options)
+        .prefetch(tf.data.experimental.AUTOTUNE)
+        .unbatch()
+    )
+
+    # For debugging purposes, do a step that does nothing
+    tfd_no_op = tfdNoOp()
+    tiles = tiles.map(tfd_no_op)
+
+    # For debugging purposes, do a step that does nothing but print side effects.
+    # tfd_print = tfdPrint(tf.constant(314, dtype=tf.int32))
+    # tiles = tiles.map(tfd_print)
 
     # Read and split the chunks into the tile size we want.  Note that it is important to call
     # `.unbatch()` when it is desired that the tiles be not batched by chunk.
+    read_and_split_chunk = ReadAndSplitChunk()
     tiles = (
-        tiles.map(tf_read_and_split_chunk, **dataset_map_options)
+        tiles.map(read_and_split_chunk, **dataset_map_options)
         .prefetch(tf.data.experimental.AUTOTUNE)
         .unbatch()
     )
@@ -2566,427 +3161,39 @@ def output_example(features, metadata):
     print("output_example: %f seconds" % (time.time() - tic))
 
 
-def get_level_and_factor(magnification, estimated, tolerance):
-    # calculate difference with magnification levels
-    delta = magnification - estimated
+"""
 
-    # match to existing levels
-    if np.min(np.abs(np.divide(delta, magnification))) < tolerance:  # match
-        level = np.squeeze(np.argmin(np.abs(delta)))
-        factor = 1.0
-    elif np.any(delta < 0):
-        value = np.max(delta[delta < 0])
-        level = np.squeeze(np.argwhere(delta == value)[0])
-        factor = magnification / estimated[level]
-    else:  # desired magnification above base level - throw error
-        raise ValueError("Cannot interpolate above scan magnification.")
+Miscellaneous functions that are not directly useful in the tensorflow pipeline.
 
-    return level, factor
+"""
 
 
-def py_compute_read_parameters(filenameIn, magnificationIn, toleranceIn):
-    filename = filenameIn.numpy().decode("utf-8")
-    magnification = magnificationIn.numpy()
-    tolerance = toleranceIn.numpy()
+def _random_mask(shape):  # ITK order: (width, height)
+    # Here we will make a mask with random 0 and 1 values as a demonstration.
+    MaskDimension = 2
+    MaskPixelType = itk.UC
+    MaskImageType = itk.Image[MaskPixelType, MaskDimension]
+    mask_index = itk.Index[MaskDimension]()
+    mask_index.Fill(0)
+    mask_size = itk.Size[MaskDimension]()
+    mask_size[0] = shape[0]  # width
+    mask_size[1] = shape[1]  # height
+    mask_region = itk.ImageRegion[MaskDimension]()
+    mask_region.SetIndex(mask_index)
+    mask_region.SetSize(mask_size)
+    mask_image = MaskImageType.New()
+    mask_image.SetRegions(mask_region)
+    mask_image.Allocate()
+    random.seed("20210311", version=2)
+    for y in range(mask_size[1]):
+        for x in range(mask_size[0]):
+            # Use numpy index order on left-hand side
+            mask_image[y, x] = random.randrange(0, 2)
 
-    if re.compile(r"\.svs$").search(filename):
-        # read whole-slide image file and create openslide object
-        os_obj = os.OpenSlide(filename)
-
-        # measure objective of level 0
-        objective = np.float32(os_obj.properties[os.PROPERTY_NAME_OBJECTIVE_POWER])
-
-        # calculate magnifications of levels
-        estimated = np.array(objective / os_obj.level_downsamples)
-
-        # Find best level to use and its factor
-        level, factor = get_level_and_factor(magnification, estimated, tolerance)
-
-        # get slide width, height at desired magnification. (Note width before height)
-        width, height = os_obj.level_dimensions[level]
-
-    elif re.compile(r"\.zarr$").search(filename):
-        # read whole-slide image and create zarr objects
-        store = zarr.DirectoryStore(filename)
-        source_group = zarr.open(store, mode="r")
-
-        # measure objective of level 0
-        objective = np.float32(source_group.attrs[os.PROPERTY_NAME_OBJECTIVE_POWER])
-
-        # calculate magnifications of levels
-        estimated = np.array(objective / source_group.attrs["level_downsamples"])
-
-        # Find best level to use and its factor
-        level, factor = get_level_and_factor(magnification, estimated, tolerance)
-
-        # get slide width, height at desired magnification. (Note height before width)
-        height, width = source_group[format(level)].shape[0:2]
-
-    else:
-        # We don't know magnifications so assume reasonable values for level and factor.
-        level = 0
-        factor = 1.0
-        if True:
-            pil_obj = Image.open(filename)
-            width, height = pil_obj.size
-        else:
-            # For the case that we know the image size without opening the file
-            width, height = 2048, 2048
-
-    print(f"level = {level}, factor = {factor}, width = {width}, height = {height}")
-    return level, factor, width, height
+    return mask_image
 
 
-def tf_compute_read_parameters(elem, tolerance=tf.constant(0.02, dtype=tf.float32)):
-    level, factor, width, height = tf.py_function(
-        func=py_compute_read_parameters,
-        inp=[elem["filename"], elem["magnification"], tolerance],
-        Tout=(tf.int32, tf.float32, tf.int32, tf.int32),
-    )
-    return {**elem, "level": level, "factor": factor, "width": width, "height": height}
-
-
-def tf_compute_chunk_positions(elem):
-    zero = tf.constant(0, dtype=tf.int32)
-    one = tf.constant(1, dtype=tf.int32)
-    chunk_width = elem["cwf"] * (elem["tw"] - elem["ow"]) + elem["ow"]
-    chunk_height = elem["chf"] * (elem["th"] - elem["oh"]) + elem["oh"]
-
-    # The left side of a tile cannot be as large as left_bound.  Also, the left side of a chunk cannot
-    # be as large as left_bound because chunks contain a whole number of tiles.
-    left_bound = tf.maximum(
-        zero,
-        elem["width"] - elem["ow"] if elem["fractional"] else elem["width"] - elem["tw"] + one,
-    )
-    chunk_left = tf.range(zero, left_bound, chunk_width - elem["ow"])
-    chunk_right = tf.clip_by_value(chunk_left + chunk_width, zero, elem["width"])
-
-    top_bound = tf.maximum(
-        zero,
-        elem["height"] - elem["oh"] if elem["fractional"] else elem["height"] - elem["th"] + one,
-    )
-    chunk_top = tf.range(zero, top_bound, chunk_height - elem["oh"])
-    chunk_bottom = tf.clip_by_value(chunk_top + chunk_height, zero, elem["height"])
-
-    cx = tf.tile(chunk_left, tf.stack([tf.size(chunk_top)]))
-    cw = tf.tile(chunk_right - chunk_left, tf.stack([tf.size(chunk_top)]))
-    cy = tf.repeat(chunk_top, tf.size(chunk_left))
-    ch = tf.repeat(chunk_bottom - chunk_top, tf.size(chunk_left))
-    len = tf.size(cx)
-
-    # If a mask was supplied, compute a mask for each chunk.  The size of a mask for a chunk will be
-    # chunk_width_factor by chunk_height_factor, even along the right or bottom border where it will be
-    # padded if necessary.
-    has_mask = "mask_wsi" in elem.keys()
-
-    mask_chunks = tf.TensorArray(dtype=tf.bool, size=len)
-    if has_mask:
-        mask_width = tf.shape(elem["mask_wsi"])[1]
-        mask_left = tf.cast(chunk_left / (elem["tw"] - elem["ow"]), dtype=tf.int32)
-        mask_right = tf.clip_by_value(mask_left + elem["cwf"], zero, mask_width)
-        mask_height = tf.shape(elem["mask_wsi"])[0]
-        mask_top = tf.cast(chunk_top / (elem["th"] - elem["oh"]), dtype=tf.int32)
-        mask_bottom = tf.clip_by_value(mask_top + elem["chf"], zero, mask_height)
-        mask_x = tf.tile(mask_left, tf.stack([tf.size(mask_top)]))
-        mask_w = tf.tile(mask_right - mask_left, tf.stack([tf.size(mask_top)]))
-        mask_y = tf.repeat(mask_top, tf.size(mask_left))
-        mask_h = tf.repeat(mask_bottom - mask_top, tf.size(mask_left))
-        len = tf.size(mask_x)
-
-        # mask_chunks = [elem["mask_wsi"][y:(y+h), x:(x+w)] for x, y, w, h in zip(mask_x, mask_w, mask_y, mask_h)]
-        condition = lambda i, _: tf.less(i, len)
-        body = lambda i, mask_chunks: (
-            i + 1,
-            mask_chunks.write(
-                i,
-                tf.image.crop_to_bounding_box(
-                    elem["mask_wsi"],
-                    tf.gather(mask_y, i),
-                    tf.gather(mask_x, i),
-                    tf.gather(mask_h, i),
-                    tf.gather(mask_w, i),
-                ),
-            ),
-        )
-        _, mask_chunks = tf.while_loop(condition, body, [0, mask_chunks])
-
-    mask_chunks = mask_chunks.stack()
-    response = {}
-    for key in elem.keys():
-        if key != "mask_wsi":
-            # Exclude mask_wsi because it is large and we now have mask_chunk.
-            response[key] = tf.repeat(elem[key], len)
-    response = {**response, "cx": cx, "cy": cy, "cw": cw, "ch": ch}
-    if has_mask:
-        response = {**response, "mask_chunk": mask_chunks}
-    return response
-
-
-def py_read_chunk(filenameIn, level, x, y, w, h):
-    filename = filenameIn.numpy().decode("utf-8")
-    if re.compile(r"\.svs$").search(filename):
-        if True:
-            # Use OpenSlide to read SVS image
-            os_obj = os.OpenSlide(filename)
-
-            # read chunk and convert to tensor
-            chunk = np.array(
-                os_obj.read_region((x.numpy(), y.numpy()), level.numpy(), (w.numpy(), h.numpy()))
-            )
-        elif True:
-            # Use fsspec to read the SVS image
-            # This is NOT working code!!!
-            with fsspec.open(filename) as store:
-                source_group = zarr.open(store, mode="r")
-                # Zarr formats other than using zarr-jpeg package have shape (height, width, colors)
-                # using order="C".
-                chunk = source_group[format(level.numpy())][
-                    y.numpy() : (y.numpy() + h.numpy()),
-                    x.numpy() : (x.numpy() + w.numpy()),
-                    :,
-                ]
-        elif False:
-            # Read the SVS image with napari_lazy_openslide.lazy_openslide.OpenSlideStore
-            store = OpenSlideStore(filename, tilesize=2048)
-            source_group = zarr.open(store, mode="r")
-            # Zarr formats other than zarr-jpeg have shape (height, width, colors) using order="C".
-            chunk = source_group[format(level.numpy())][
-                y.numpy() : (y.numpy() + h.numpy()),
-                x.numpy() : (x.numpy() + w.numpy()),
-                :,
-            ]
-        else:
-            # Use tifffile to read the SVS image 'aszarr'
-            # store = tifffile.imread(filename)
-            store = tifffile.imread(filename, aszarr=True)
-            # store = tifffile.imread(filename, aszarr=True, chunkmode="page")
-            source_group = zarr.open(store, mode="r")
-            chunk = source_group[format(level.numpy())][
-                y.numpy() : (y.numpy() + h.numpy()),
-                x.numpy() : (x.numpy() + w.numpy()),
-                :,
-            ]
-
-    elif re.compile(r"\.zarr$").search(filename):
-        # `filename` is a directory that stores an image in Zarr format.
-        store = zarr.DirectoryStore(filename)
-        source_group = zarr.open(store, mode="r")
-        # Zarr formats other than using zarr-jpeg package have shape (height, width, colors) using
-        # order="C".
-        chunk = source_group[format(level.numpy())][
-            y.numpy() : (y.numpy() + h.numpy()),
-            x.numpy() : (x.numpy() + w.numpy()),
-            :,
-        ]
-        # Do chunk width and height need to be transposed to be consistent with SVS?!!!
-
-    else:
-        pil_obj = Image.open(filename)
-        chunk = np.asarray(pil_obj)[
-            x.numpy() : (x.numpy() + w.numpy()), y.numpy() : (y.numpy() + h.numpy()), :
-        ]
-
-    # Do we want to support other than uint8?!!!
-    return tf.convert_to_tensor(chunk[..., :3], dtype=tf.uint8)
-
-
-def tf_read_and_split_chunk(elem):
-    zero8 = tf.constant(0, dtype=tf.uint8)
-    zero32 = tf.constant(0, dtype=tf.int32)
-    one8 = tf.constant(1, dtype=tf.uint8)
-    one32 = tf.constant(1, dtype=tf.int32)
-
-    left_bound = tf.maximum(
-        zero32,
-        elem["cw"] - elem["ow"] if elem["fractional"] else elem["cw"] - elem["tw"] + one32,
-    )
-    tile_left = tf.range(zero32, left_bound, elem["tw"] - elem["ow"])
-    tile_right = tf.clip_by_value(tile_left + elem["tw"], zero32, elem["cw"])
-    usable_mask_width = tf.size(tile_left)
-
-    top_bound = tf.maximum(
-        zero32,
-        elem["ch"] - elem["oh"] if elem["fractional"] else elem["ch"] - elem["th"] + one32,
-    )
-    tile_top = tf.range(zero32, top_bound, elem["th"] - elem["oh"])
-    tile_bottom = tf.clip_by_value(tile_top + elem["th"], zero32, elem["ch"])
-    usable_mask_height = tf.size(tile_top)
-
-    x = tf.tile(tile_left, tf.stack([tf.size(tile_top)]))
-    w = tf.tile(tile_right - tile_left, tf.stack([tf.size(tile_top)]))
-    y = tf.repeat(tile_top, tf.size(tile_left))
-    h = tf.repeat(tile_bottom - tile_top, tf.size(tile_left))
-    len = tf.size(x)
-    tiles = tf.TensorArray(dtype=tf.uint8, size=len)
-
-    mask_chunk_supplied = "mask_chunk" in elem.keys()
-    if mask_chunk_supplied:
-        mask_chunk = elem["mask_chunk"]
-
-    # Handle the case that we need to read from disk
-    read_chunk = not mask_chunk_supplied or tf.math.reduce_any(mask_chunk)
-    if read_chunk:
-        chunk = tf.py_function(
-            func=py_read_chunk,
-            inp=[
-                elem["filename"],
-                elem["level"],
-                elem["cx"],
-                elem["cy"],
-                elem["cw"],
-                elem["ch"],
-            ],
-            Tout=tf.uint8,
-        )
-
-        condition = lambda i, _: tf.less(i, len)
-        body = lambda i, tiles: (
-            i + 1,
-            tiles.write(
-                i,
-                tf.image.crop_to_bounding_box(
-                    chunk,
-                    tf.gather(y, i),
-                    tf.gather(x, i),
-                    tf.gather(h, i),
-                    tf.gather(w, i),
-                ),
-            ),
-        )
-        _, tiles = tf.while_loop(condition, body, [0, tiles])
-        del chunk
-
-    tiles = tiles.stack()
-
-    # Figure out which tiles we are going to keep
-    if not read_chunk:
-        # Keep nothing
-        where = tf.where(tf.repeat(False, len))
-    elif mask_chunk_supplied:
-        # Use the supplied mask
-        where = tf.where(tf.reshape(mask_chunk[:usable_mask_height, :usable_mask_width, 0], [len,]))
-    else:
-        # Keep everything
-        where = tf.where(tf.repeat(True, len))
-    # Change shape from (tf.size(where), 1) to (tf.size(where),)
-    where = tf.reshape(where, [tf.size(where)])
-
-    # Construct the response
-    all_tiles = {}
-    for key in elem.keys():
-        if key != "mask_chunk":
-            # Exclude mask_chunk because it is useless at the tile level
-            all_tiles[key] = tf.repeat(elem[key], len)
-    all_tiles = {
-        **all_tiles,
-        "tx": elem["cx"] + x,
-        "ty": elem["cy"] + y,
-        "tw": w,
-        "th": h,
-        "tile": tiles,
-    }
-
-    # Keep only the tiles that we want.  If we have read in the chunk and don't have mask_chunk supplied
-    # then there is nothing to do because we are keeping everything.
-
-    response = {}
-    for key in all_tiles.keys():
-        response[key] = tf.gather(all_tiles[key], where)
-
-    return response
-
-
-def py_compute_resampled_mask(
-    mask_filenameIn, widthIn, heightIn, cwfIn, chfIn, twIn, thIn, owIn, ohIn, fractionalIn
-):
-    mask_filename = mask_filenameIn.numpy().decode("utf-8")
-    width = widthIn.numpy()
-    height = heightIn.numpy()
-    cwf = cwfIn.numpy()
-    chf = chfIn.numpy()
-    tw = twIn.numpy()
-    th = thIn.numpy()
-    ow = owIn.numpy()
-    oh = ohIn.numpy()
-    fractional = fractionalIn.numpy()
-
-    left_bound = max(0, width - ow if fractional else width - tw + 1)
-    top_bound = max(0, height - oh if fractional else height - th + 1)
-
-    # Note that we are assuming that the process of downsampling (or upsampling) the mask to be one
-    # pixel per tile will take care of any aspects related to the overlapping of tiles.  Subsequent to
-    # that, we will not be looking at the mask pixels for adjacent tiles even though they may overlap
-    # with the tile being considered.
-
-    # Note that we are assuming that the mask will be downsampled (or upsampled) to have one whole pixel
-    # per tile, even if not every tile is whole; that is even if some are fractional tiles from the
-    # right or bottom edges.
-
-    # Read in an image from the supplied file name for the mask
-    mask_itk = itk.imread(mask_filename)
-    if mask_itk.GetImageDimension() != 2:
-        raise ValueError("The mask should be a 2-dimensional image.")
-    mask = tf.constant(itk.array_from_image(mask_itk))
-    # Add batch and channels dimensions
-    mask = mask[tf.newaxis, ..., tf.newaxis]
-    # The new size is one pixel per tile
-    resampled_width = int(np.floor((left_bound - 1) / (tw - ow)) + 1)
-    resampled_height = int(np.floor((top_bound - 1) / (th - oh)) + 1)
-    if abs(math.log((resampled_width / mask.shape[2]) / (resampled_height / mask.shape[1]))) > 0.20:
-        raise ValueError("The mask aspect ratio does not match the image aspect ratio.")
-    resampled_shape = (resampled_height, resampled_width)
-    # Perform the resampling
-    resampled = tf.image.resize(mask, resampled_shape)[0, ...]
-
-    # * At some point the mask gets broken up into chunks that are chunk_height_factor by
-    # chunk_width_factor; to make tensorflow happy, we make sure that the dimensions of the mask are
-    # multiples of those values.
-    # * Also, we reshape so that the mask has shape (padded_height, padded_width, channels) where
-    # channels = 1.
-    # * Also, we cast the array to type np.bool.  (Note that we use a formula with floor() rather than a
-    # formula with ceil() so that we get the same answer with float or integer division for the
-    # argument.)
-    padded_resampled = np.zeros(
-        (
-            int((tf.math.floor((resampled_shape[0] - 1) / chf) + 1) * chf),
-            int((tf.math.floor((resampled_shape[1] - 1) / cwf) + 1) * cwf),
-            1,
-        ),
-        dtype=np.bool,
-    )
-    padded_resampled[:resampled_shape[0], :resampled_shape[1], :1,] = resampled
-    del resampled
-
-    # print(f"resampled_shape = {resampled_shape}")
-    # print(f"padded_resampled.shape = {padded_resampled.shape}")
-    # tf.print(padded_resampled[:8,:8,0])
-    return padded_resampled
-
-
-def tf_compute_resampled_mask(elem):
-    if "mask_filename" in elem.keys():
-        mask_wsi = tf.py_function(
-            func=py_compute_resampled_mask,
-            inp=[
-                elem["mask_filename"],
-                elem["width"],
-                elem["height"],
-                elem["cwf"],
-                elem["chf"],
-                elem["tw"],
-                elem["th"],
-                elem["ow"],
-                elem["oh"],
-                elem["fractional"],
-            ],
-            Tout=tf.bool,
-        )
-        return {**elem, "mask_wsi": mask_wsi}
-    else:
-        return elem
-
-
-def convert_openslide_to_chunks(
+def _convert_openslide_to_chunks(
     svs_filename,
     chunks_dirname,
     chunks_type="jpeg",
@@ -3027,11 +3234,11 @@ def convert_openslide_to_chunks(
             image.save(filename, **kwargs)
 
 
-# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg95.stack", "jpeg", quality=95)
-# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg75.stack", "jpeg", quality=75)
-# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg50.stack", "jpeg", quality=50)
-# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg25.stack", "jpeg", quality=25)
-# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg2000.stack", "jpeg2000")
-# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "j2k.stack", "j2k")
-# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpx.stack", "jpx")
-# convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "png.stack", "png")
+# _convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg95.stack", "jpeg", quality=95)
+# _convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg75.stack", "jpeg", quality=75)
+# _convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg50.stack", "jpeg", quality=50)
+# _convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg25.stack", "jpeg", quality=25)
+# _convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpeg2000.stack", "jpeg2000")
+# _convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "j2k.stack", "j2k")
+# _convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "jpx.stack", "jpx")
+# _convert_openslide_to_chunks("TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs", "png.stack", "png")
