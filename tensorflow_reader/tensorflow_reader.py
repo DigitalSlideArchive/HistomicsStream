@@ -1,4 +1,8 @@
-"""Whole-slide image file reader for TensorFlow"""
+"""Whole-slide image file reader for TensorFlow.
+
+This module supports efficient whole-slide reading and processing in a tensorflow graph.
+
+"""
 
 __version__ = "1.0.7"
 
@@ -24,23 +28,22 @@ import tifffile
 import time
 import zarr
 
-"""
-
-Definitions of codecs:
-
-For the code that uses Zarr data storage for jpeg images, we need to supply codecs.  Note that we use
-these codecs instead of those available from the zarr_jpeg package.  The latter collapses dimensions by
-default, can require us to transpose dimensions, and can miss optimizations based upon RGB data.
-
-"""
-
 
 class jpeg(Codec):
     """Codec providing jpeg compression via imagecodecs.
+
     Parameters
     ----------
     quality : int
         Compression level.
+
+    Notes
+    -----
+    For the code that uses Zarr data storage for jpeg images, we need to supply codecs.  Note that we
+    use this codec instead of that available from the zarr_jpeg package.  The latter collapses
+    dimensions by default, can require us to transpose dimensions, and can miss optimizations based upon
+    RGB data.
+
     """
 
     codec_id = "jpeg"
@@ -51,11 +54,41 @@ class jpeg(Codec):
         super().__init__()
 
     def encode(self, buf):
+        """The method to encode a raw image into jpeg format.
+
+        Parameters
+        ----------
+        buf : ndarray
+            The raw image to be encoded into jpeg format
+
+        Returns
+        -------
+        ndarray
+            The image in jpeg format
+
+        """
+
         bufa = ensure_ndarray(buf)
         assert 2 <= bufa.ndim <= 3
         return jpeg_encode(bufa, level=self.quality)
 
     def decode(self, buf, out=None):
+        """The method to decode a jpeg image into a raw format.
+
+        Parameters
+        ----------
+        buf : contiguous_ndarray
+            The jpeg image to be decoded into raw format.
+        out : contiguous_ndarray, optional
+            Another location to write the raw image to.
+
+        Returns
+        -------
+        ndarray
+            The image in raw format
+
+        """
+
         buf = ensure_contiguous_ndarray(buf)
         if out is not None:
             out = ensure_contiguous_ndarray(out)
@@ -68,10 +101,12 @@ register_codec(jpeg)
 
 class jpeg2k(Codec):
     """Codec providing jpeg2k compression via imagecodecs.
+
     Parameters
     ----------
     quality : int
         Compression level.
+
     """
 
     codec_id = "jpeg2k"
@@ -82,11 +117,41 @@ class jpeg2k(Codec):
         super().__init__()
 
     def encode(self, buf):
+        """The method to encode a raw image into jpeg2k format.
+
+        Parameters
+        ----------
+        buf : ndarray
+            The raw image to be encoded into jpeg2k format
+
+        Returns
+        -------
+        ndarray
+            The image in jpeg2k format
+
+        """
+
         bufa = ensure_ndarray(buf)
         assert 2 <= bufa.ndim <= 3
         return jpeg2k_encode(bufa, level=self.quality)
 
     def decode(self, buf, out=None):
+        """The method to decode a jpeg2k image into a raw format.
+
+        Parameters
+        ----------
+        buf : contiguous_ndarray
+            The jpeg2k image to be decoded into raw format.
+        out : contiguous_ndarray, optional
+            Another location to write the raw image to.
+
+        Returns
+        -------
+        ndarray
+            The image in raw format
+
+        """
+
         buf = ensure_contiguous_ndarray(buf)
         if out is not None:
             out = ensure_contiguous_ndarray(out)
@@ -97,28 +162,45 @@ class jpeg2k(Codec):
 register_codec(jpeg2k)
 
 
-"""
-
-Definitions of callable classes that can be supplied to tensorflow:
-
-Note that the __init__ function in these classes cannot be decorated with `@tf.function` for reasons
-that are not clear, but might (or might not!) be because an instance of a class (returned by the
-__init__ method) is not a tensorflow object.
-
-"""
-
-"""
-
-tfdHeader: An instance of class `tfdHeader` can be cast to `dict` and supplied to
-`tensorflow.data.Dataset.from_tensor_slices` to create an instance of a tensorflow dataset object.  The
-primary functionality of this class over an ordinary dictionary is that (1) it requires all the named
-keys, (2) it ensures that each value is a list or tuple, and (3) it expands any length-one lists to be
-the same length as the number of supplied filenames.  Additional error checking could be added.
-
-"""
-
-
 class tfdHeader:
+    """A class used to initialize a tensorflow.data.Dataset.
+
+    An instance of class tfdHeader can be cast to dict and supplied to
+    tensorflow.data.Dataset.from_tensor_slices to create an instance of a tensorflow dataset object.
+    The primary functionality of this class over an ordinary dictionary is that (1) it requires all the
+    named keys, (2) it ensures that each value is a list or tuple, and (3) it expands via repetition any
+    length-one lists to be the same length as the number of supplied filenames.
+
+    Each parameter includes one value per slide to be analyzed.  However, if a parameter is a list (or
+    tuple) of length 1 then that one value is used for every slide.
+
+    Parameters
+    ----------
+    slides : str
+        A list of names of the slides to be processed
+    filenames : str
+        A list of file names that contain the slides data
+    cases : str
+        A list of names of cases, where multiple slides could belong to each case
+    magnifications : str
+        A list of the desired manification levels that the slides should be analyzed at
+    read_modes : str
+        A list of keywords.  Currently only "tiled" is supported.
+    mask_filenames : str
+        A list of masks for the slides.  Each slide's mask will be used to select which tiles of the
+        slide to process.  If the mask does not have one pixel per tile then it will be upsampled or
+        downsampled as necessary.
+
+    Notes
+    -----
+    Note that the __init__ method cannot be decorated with @tf.function for reasons that are not clear,
+    but might (or might not!) be because an instance of a class (returned by the __init__ method) is not
+    a tensorflow object.
+
+    Because it has the keys and __getitem__ methods, this class can be cast to a Python dict.
+
+    """
+
     def __init__(self, slides, filenames, cases, magnifications, read_modes, mask_filenames):
         self.dictionary = {
             "slide": slides,
@@ -140,41 +222,46 @@ class tfdHeader:
                 if key != "filename" and len(self.dictionary[key]) == 1:
                     self.dictionary[key] = self.dictionary[key] * len(filenames)
 
-    # Because it has the `keys` and `__getitem__` methods, this class can be cast to a Python `dict`.
     def keys(self):
+        """The method that returns the keys of the key-value pairs stored by tfdHeader."""
         return self.dictionary.keys()
 
     def __getitem__(self, key):
+        """The method that returns the value corresponding to a key by tfdHeader."""
         return self.dictionary[key]
 
 
-"""
-
-tfdNoOp: An instance of class `tfdNoOp` can be supplied as an argument to `tensorflow.dataset.map`.  It
-is a "no operation" callable that accepts a single argument.
-
-"""
-
-
 class tfdNoOp:
+    """A class that does nothing that can be supplied to tensorflow.dataset.map
+
+    An instance of class tfdNoOp can be supplied as an argument to tensorflow.dataset.map.  It is a "no
+    operation" callable that accepts a single argument.
+
+    """
+
     @tf.function
     def __call__(self, elem):
+        """This method is called by tensorflow to do the work of this class."""
         return elem
 
 
-"""
-
-tfdPrint: An instance of class `tfdPrint` can be supplied as an argument to `tensorflow.dataset.map`.
-Like `tfdNoOp`, it is a "no operation" callable that accepts a single argument, though it has side
-effects in that it prints.  It demonstrates that tensorflow graph functionality is working by printing
-at tensorflow-graph trace time and at tensorflow-graph run time.  It also demonstrates that tensorflow
-graph functionality is properly handling the information flow from __init__ to __call__.
-
-"""
-
-
 class tfdPrint:
-    # @tf.function
+    """A class that does nothing but print that can be supplied to tensorflow.dataset.map
+
+    An instance of class tfdPrint can be supplied as an argument to tensorflow.dataset.map.  Like
+    tfdNoOp, it is a "no operation" callable that accepts a single argument, though it has side effects
+    in that it prints.  It demonstrates that tensorflow graph functionality is working by printing at
+    tensorflow-graph trace time and at tensorflow-graph run time.  It also demonstrates that tensorflow
+    graph functionality is properly handling the information flow from __init__ to __call__.
+
+    Notes
+    -----
+    Note that the __init__ method cannot be decorated with @tf.function for reasons that are not clear,
+    but might (or might not!) be because an instance of a class (returned by the __init__ method) is not
+    a tensorflow object.
+
+    """
+
     def __init__(self, member):
         self.member = member
         tf.print("Running tfdPrint.__init__, with member = ", self.member)
@@ -182,30 +269,39 @@ class tfdPrint:
 
     @tf.function
     def __call__(self, elem):
+        """This method is called by tensorflow to do the work of this class."""
+
         tf.print("Running tfdPrint.__call__, with member = ", self.member)
         print("Tracing tfdPrint.__call__")
         return elem
 
 
-"""
-
-ComputeReadParameters: An instance of class ComputeReadParameters can be supplied as an argument to
-`tensorflow.dataset.map`.  ComputeReadParameters computes `level`, `factor`, `width`, and `height` from
-the inputs `filename`, `magnification`, and `tolerance`.  ComputeReadParameters adds new key-value pairs
-to the tensorflow dictionary for the newly computed values.  Ideally the implementation would be all
-`tf.function` (i.e., a tensorflow graph function); however, much of the code is via a tensorflow
-`py_function` because our current implementation for discerning the size of an image without reading in
-the pixel values uses non-tensorflow packages, such as `openslide`.
-
-"""
-
-
 class ComputeReadParameters:
+    """A class that computes read parameters for slides in a tensorflow dataset.
+
+    An instance of class ComputeReadParameters can be supplied as an argument to tensorflow.dataset.map.
+    ComputeReadParameters computes level, factor, width, and height from the inputs filename,
+    magnification, and tolerance.  ComputeReadParameters adds new key-value pairs to the tensorflow
+    dictionary for the newly computed values.  Ideally the implementation would be all tf.function
+    (i.e., a tensorflow graph function); however, much of the code is via a tensorflow py_function
+    because our current implementation for discerning the size of an image without reading in the pixel
+    values uses non-tensorflow packages, such as openslide.
+
+    Notes
+    -----
+    Note that the __init__ method cannot be decorated with @tf.function for reasons that are not clear,
+    but might (or might not!) be because an instance of a class (returned by the __init__ method) is not
+    a tensorflow object.
+
+    """
+
     def __init__(self, tolerance=tf.constant(0.02, dtype=tf.float32)):
         self.tolerance = tolerance
 
     @tf.function
     def __call__(self, elem):
+        """This method is called by tensorflow to do the work of this class."""
+
         level, factor, width, height = tf.py_function(
             func=self._py_compute_read_parameters,
             inp=[elem["filename"], elem["magnification"], self.tolerance],
@@ -215,6 +311,8 @@ class ComputeReadParameters:
         return response
 
     def _py_compute_read_parameters(self, filenameIn, magnificationIn, toleranceIn):
+        """This method is the internal py_function (i.e. not @tf.function) that does the actual work of this class."""
+
         filename = filenameIn.numpy().decode("utf-8")
         magnification = magnificationIn.numpy()
         tolerance = toleranceIn.numpy()
@@ -267,6 +365,8 @@ class ComputeReadParameters:
         return level, factor, width, height
 
     def _get_level_and_factor(self, magnification, estimated, tolerance):
+        """This method computes level and factor for _py_compute_read_parameters."""
+
         # calculate difference with magnification levels
         delta = magnification - estimated
 
@@ -284,21 +384,43 @@ class ComputeReadParameters:
         return level, factor
 
 
-"""
-
-AddTileDescription: An instance of class AddTileDescription can be supplied as an argument to
-`tensorflow.dataset.map`.  AddTileDescription adds new key-value pairs to the tensorflow dictionary to
-set the desired tile width, height, width overlap, and height overlap for each element, and to indicate
-whether we want tiles even if they are fractional (aka of truncated size) due to partially falling off
-the edge of the image.  (These fractional tiles can be problematic because tensorflow likes its shapes
-to be uniform.)  chunk_width_factor and chunk_height_factor indicate how many tiles are read at a time.
-The primary functionality of this class over an ordinary dictionary is that it sets all the required
-keys and no others.
-
-"""
-
-
 class AddTileDescription:
+    """A class for supplying tile size and other information that can be supplied to tensorflow.dataset.map
+
+    An instance of class AddTileDescription can be supplied as an argument to tensorflow.dataset.map.
+    AddTileDescription adds new key-value pairs to the tensorflow dictionary to set the desired tile
+    width, height, width overlap, and height overlap for each element, and to indicate whether we want
+    tiles even if they are fractional (aka of truncated size) due to partially falling off the edge of
+    the image.  (These fractional tiles can be problematic because tensorflow likes its shapes to be
+    uniform.)  chunk_width_factor and chunk_height_factor indicate how many tiles are read at a time.
+    The primary functionality of this class over an ordinary dictionary is that it sets all the required
+    keys and no others.
+
+    Parameters
+    ----------
+    tile_width : tf.constant(, dtype=tf.int32)
+        The desired width of each tile.
+    tile_height : tf.constant(, dtype=tf.int32)
+        The desired height of each tile.
+    overlap_width : tf.constant(, dtype=tf.int32)
+        The amount of overlap of width between adjacent tiles.
+    overlap_height : tf.constant(, dtype=tf.int32)
+        The amount of overlap of height between adjacent tiles.
+    chunk_width_factor : tf.constant(, dtype=tf.int32)
+        The width of a chunk read from disk at one time as measured in number of (possibly) tiles.
+    chunk_height_factor : tf.constant(, dtype=tf.int32)
+        The height of a chunk read from disk at one time as measured in number of (possibly) tiles.
+    fractional : tf.constant(, dtype=tf.bool)
+        Set to True if tiles at the edges of the slide that are less than full width or full height should be retained.
+
+    Notes
+    -----
+    Note that the __init__ method cannot be decorated with @tf.function for reasons that are not clear,
+    but might (or might not!) be because an instance of a class (returned by the __init__ method) is not
+    a tensorflow object.
+
+    """
+
     def __init__(
         self,
         tile_width=tf.constant(256, dtype=tf.int32),
@@ -321,26 +443,29 @@ class AddTileDescription:
 
     @tf.function
     def __call__(self, elem):
+        """This method is called by tensorflow to do the work of this class."""
+
         return {**elem, **self.dictionary}
 
 
-"""
-
-ComputeResampledMask: An instance of class ComputeResampledMask can be supplied as an argument to
-`tensorflow.dataset.map`.  ComputeResampledMask reads in a supplied mask and upsamples or downsamples it
-if necessary so that there is exactly one pixel in the mask for each tile in the input image.  Note that
-we are assuming that this will take care of any aspects related to the overlapping of tiles.  Subsequent
-to that, we will not be looking at the mask pixels for adjacent tiles even though they may overlap with
-the tile being considered.  Note further that we are assuming that the mask will be downsampled (or
-upsampled) to have one whole pixel per tile, even if not every tile is whole; that is even if some are
-fractional tiles from the right or bottom edges.
-
-"""
-
-
 class ComputeResampledMask:
+    """A class that uses mask information to select tiles.
+
+    An instance of class ComputeResampledMask can be supplied as an argument to tensorflow.dataset.map.
+    ComputeResampledMask reads in a supplied mask and upsamples or downsamples it if necessary so that
+    there is exactly one pixel in the mask for each tile in the input image.  Note that we are assuming
+    that this will take care of any aspects related to the overlapping of tiles.  Subsequent to that, we
+    will not be looking at the mask pixels for adjacent tiles even though they may overlap with the tile
+    being considered.  Note further that we are assuming that the mask will be downsampled (or
+    upsampled) to have one whole pixel per tile, even if not every tile is whole; that is even if some
+    are fractional tiles from the right or bottom edges.
+
+    """
+
     @tf.function
     def __call__(self, elem):
+        """This method is called by tensorflow to do the work of this class."""
+
         if "mask_filename" in elem.keys():
             mask_wsi = tf.py_function(
                 func=self._py_compute_resampled_mask,
@@ -365,6 +490,8 @@ class ComputeResampledMask:
     def _py_compute_resampled_mask(
         self, mask_filenameIn, widthIn, heightIn, cwfIn, chfIn, twIn, thIn, owIn, ohIn, fractionalIn
     ):
+        """This method is the internal py_function (i.e. not @tf.function) that does much of the actual work of this class."""
+
         mask_filename = mask_filenameIn.numpy().decode("utf-8")
         width = widthIn.numpy()
         height = heightIn.numpy()
@@ -424,20 +551,21 @@ class ComputeResampledMask:
         return padded_resampled
 
 
-"""
-
-ComputeChunkPositions: An instance of class ComputeChunkPositions can be supplied as an argument to
-`tensorflow.dataset.map`.  ComputeChunkPositions figures out what the read chunks will be based upon the
-tile parameters (size, overlap, fractional).  It divvys up the mask into pieces corresponding to the
-read chunks.  Note that it is important to subsequently call `.unbatch()` when it is desired that the
-chunks be not batched by slide.
-
-"""
-
-
 class ComputeChunkPositions:
+    """A class for computing the locations of chunks to be read from a whole slide.
+
+    An instance of class ComputeChunkPositions can be supplied as an argument to tensorflow.dataset.map.
+    ComputeChunkPositions figures out what the read chunks will be based upon the tile parameters (size,
+    overlap, fractional).  It divvys up the mask into pieces corresponding to the read chunks.  Note
+    that it is important to subsequently call .unbatch() when it is desired that the chunks be not
+    batched by slide.
+
+    """
+
     @tf.function
     def __call__(self, elem):
+        """This method is called by tensorflow to do the work of this class."""
+
         zero = tf.constant(0, dtype=tf.int32)
         one = tf.constant(1, dtype=tf.int32)
         chunk_width = elem["cwf"] * (elem["tw"] - elem["ow"]) + elem["ow"]
@@ -513,20 +641,20 @@ class ComputeChunkPositions:
         return response
 
 
-"""
-
-ReadAndSplitChunk: An instance of class ReadAndSplitChunk can be supplied as an argument to
-`tensorflow.dataset.map`.  ReadAndSplitChunk reads in each chunk (unless no tile from the chunk is
-needed due to the mask), and then splits it into tile, retaining only those tiles indicated by them
-mask.  Note that it is important to subsequently call `.unbatch()` when it is desired that the tiles be
-not batched by chunk.
-
-"""
-
-
 class ReadAndSplitChunk:
+    """A class that reads a chunk from disk and splits it into tiles.
+
+    An instance of class ReadAndSplitChunk can be supplied as an argument to tensorflow.dataset.map.
+    ReadAndSplitChunk reads in each chunk (unless no tile from the chunk is needed due to the mask), and
+    then splits it into tile, retaining only those tiles indicated by them mask.  Note that it is
+    important to subsequently call .unbatch() when it is desired that the tiles be not batched by chunk.
+
+    """
+
     @tf.function
     def __call__(self, elem):
+        """This method is called by tensorflow to do the work of this class."""
+
         zero8 = tf.constant(0, dtype=tf.uint8)
         zero32 = tf.constant(0, dtype=tf.int32)
         one8 = tf.constant(1, dtype=tf.uint8)
@@ -639,6 +767,8 @@ class ReadAndSplitChunk:
         return response
 
     def _py_read_chunk(self, filenameIn, level, x, y, w, h):
+        """This method is the internal py_function (i.e. not @tf.function) that invokes the openslide package for reading."""
+
         filename = filenameIn.numpy().decode("utf-8")
         if re.compile(r"\.svs$").search(filename):
             if True:
@@ -706,14 +836,9 @@ class ReadAndSplitChunk:
         return tf.convert_to_tensor(chunk[..., :3], dtype=tf.uint8)
 
 
-"""
-
-Helper functions functions for the examples that follow them.
-
-"""
-
-
 def _merge_dist_tensor(strategy, distributed, axis=0):
+    """A helper function for predict_example."""
+
     # check if input is type produced by distributed.Strategy.run
     if isinstance(distributed, tf.python.distribute.values.PerReplica):
         return tf.concat(strategy.experimental_local_results(distributed), axis=axis)
@@ -722,6 +847,8 @@ def _merge_dist_tensor(strategy, distributed, axis=0):
 
 
 def _merge_dist_dict(strategy, distributed, axis=0):
+    """A helper function for predict_example."""
+
     # check if input is type produced by distributed.Strategy.run
     if isinstance(distributed, dict):
         for key in distributed.keys():
@@ -731,14 +858,9 @@ def _merge_dist_dict(strategy, distributed, axis=0):
         raise ValueError("Input to _merge_dist_tensor not a dict.")
 
 
-"""
-
-Example functions that carry out various parts of a typical tensorflow pipeline.
-
-"""
-
-
 def strategy_example():
+    """Example code for seting up a tensorflow strategy."""
+
     tic = time.time()
     # find available GPUs
     devices = [
@@ -761,6 +883,8 @@ def strategy_example():
 
 
 def read_example(devices, strategy):
+    """Example code for the file reading portion of a tensorflow dataset pipeline."""
+
     tic = time.time()
 
     dataset_map_options = {
@@ -3103,13 +3227,16 @@ def read_example(devices, strategy):
     return batched_dist
 
 
-# wrap prediction function in graph
 @tf.function
 def predict(model, element):
+    """A helper function for predict_example."""
+
     return model(element[0]), element[1]
 
 
 def predict_example(model, batched_dist, strategy):
+    """Example code for doing prediction with a tensorflow pipeline."""
+
     tic = time.time()
 
     # distributed inference, condensing distributed feature tensors, metadata dicts in lists
@@ -3141,6 +3268,8 @@ def predict_example(model, batched_dist, strategy):
 
 
 def output_example(features, metadata):
+    """Example code for writing output from a tensorflow pipeline."""
+
     tic = time.time()
 
     # write features, metadata to disk
@@ -3161,14 +3290,9 @@ def output_example(features, metadata):
     print("output_example: %f seconds" % (time.time() - tic))
 
 
-"""
-
-Miscellaneous functions that are not directly useful in the tensorflow pipeline.
-
-"""
-
-
 def _random_mask(shape):  # ITK order: (width, height)
+    """A function that generates a random mask."""
+
     # Here we will make a mask with random 0 and 1 values as a demonstration.
     MaskDimension = 2
     MaskPixelType = itk.UC
@@ -3202,6 +3326,26 @@ def _convert_openslide_to_chunks(
     overlap=0,
     **kwargs,
 ):
+    """A function that writes out one image file for each chunk of a whole slide image.
+
+    Parameters
+    ----------
+    svs_filename : str
+        The name of the input image file name
+    chunks_dirname : str
+        The directory to put the output into
+    chunks_type : str
+        The image type of each file to be written.  E.g., "jpeg".
+    chunk_factor : int
+        The number of tiles (for both width and height) that make up a chunk
+    tile_size : int
+        The number of pixels (for both width and height) that make up a tile
+    overlap : int
+        The number of pixels of overlap (for both width and height) between adjacent tiles.
+    **kwargs
+        Optional key-value pairs to be passed to PIL.Image.save(), such as "quality=30" for jpeg writing.
+    """
+
     assert isinstance(svs_filename, str)
     assert isinstance(chunks_dirname, str)
     assert isinstance(chunks_type, str)
