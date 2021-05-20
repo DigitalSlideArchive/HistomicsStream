@@ -18,8 +18,8 @@ requires = [
          "tiffile",
          "zarr",
          ]
-module = "tensorflow_reader"
+module = "histomics-stream"
 author = "Lee Newberg"
 author-email = "lee.newberg@kitware.com"
-home-page = "https://github.com/DigitalSlideArchive/tensorflow_reader"
+home-page = "https://github.com/DigitalSlideArchive/histomics-stream"
 classifiers = ["License :: OSI Approved :: Apache Software License"]
