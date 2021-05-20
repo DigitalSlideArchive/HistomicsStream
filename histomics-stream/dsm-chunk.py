@@ -1,8 +1,8 @@
 """Whole-slide image file reader for TensorFlow.
 
 The histomics-stream.dsm-chunk module supports transformations that operate on a tensorflow.data.Dataset
-that has one record per read chunk.  (A "read chunk" is a collection of tiles, usually less than the
-whole slide image, that are read from storage at the same time for performance reasons.)  This module
+that has one element per read chunk  (A chunk is the unit that is read from disk. It is smaller than the 
+whole slide image but larger than a tile to minimize reads for performance.)  This module
 defines objects that can be supplied to the tf.data.Dataset.map() method.
 
 """
@@ -14,10 +14,10 @@ class ReadAndSplitChunk:
     """A class that reads a chunk from disk and splits it into tiles.
 
     An instance of class histomics-stream.dsm-chunk.ReadAndSplitChunk can be supplied as an argument to
-    tensorflow.dataset.map.  histomics-stream.dsm-chunk.ReadAndSplitChunk reads in each chunk (unless no
-    tile from the chunk is needed due to the mask), and then splits it into tile, retaining only those
-    tiles indicated by them mask.  Note that it is important to subsequently call .unbatch() when it is
-    desired that the tiles be not batched by chunk.
+    tensorflow.dataset.map.  histomics-stream.dsm-chunk.ReadAndSplitChunk reads each chunk from disk (for
+    chunks containing at least on masked tile), splits the chunk it into tiles, and discards unmasked 
+    tiles. The result is a dataset where each element is set of tiles batched by chunk. Calling .unbatch() 
+    will transform this into an unbatched dataset of tile elements.
 
     """
 
