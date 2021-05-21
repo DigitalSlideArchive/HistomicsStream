@@ -1,4 +1,4 @@
-# histomics-stream
+# histomics_stream
 
 Through version 1.0.6, this project was known as tensorflow_reader.
 
@@ -8,16 +8,16 @@ The goal of this project is to create a whole-slide image file reader for Tensor
 
 ## Installation for Python
 
-[![PyPI Version](https://img.shields.io/pypi/v/histomics-stream.svg)](https://pypi.python.org/pypi/histomics-stream)
+[![PyPI Version](https://img.shields.io/pypi/v/histomics_stream.svg)](https://pypi.python.org/pypi/histomics_stream)
 
-histomics-stream can be easily installed with Python wheels.  If you do not want the installation to be to your current Python environment, you should first create and activate a [Python virtual environment (venv)](https://docs.python.org/3/tutorial/venv.html) to work in.  Then, run the following from the command-line:
+histomics_stream can be easily installed with Python wheels.  If you do not want the installation to be to your current Python environment, you should first create and activate a [Python virtual environment (venv)](https://docs.python.org/3/tutorial/venv.html) to work in.  Then, run the following from the command-line:
 
 ```shell-script
-pip install histomics-stream
+pip install histomics_stream
 ```
 
-Launch `python3`, import the histomics-stream package, and use it
+Launch `python3`, import the histomics_stream package, and use it
 
 ```python
-import histomics-stream as hs
+import histomics_stream as hs
 ```

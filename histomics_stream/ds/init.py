@@ -1,15 +1,16 @@
 """Whole-slide image file reader for TensorFlow.
 
-The histomics-stream.ds-init module supports transformations at the beginning of a
+The histomics_stream.ds.init module supports transformations at the beginning of a
 tensorflow.data.Dataset workflow.  This module defines objects that can be supplied to the
 tensorflow.data.Dataset.from_tensor_slices() method.
 
 """
 
+
 class Header:
     """A class used to initialize a tensorflow.data.Dataset.
 
-    An instance of class histomics-stream.ds-init.Header can be cast to dict and supplied to
+    An instance of class histomics_stream.ds.init.Header can be cast to dict and supplied to
     tensorflow.data.Dataset.from_tensor_slices to create an instance of a tensorflow dataset object.
     The primary functionality of this class over an ordinary dictionary is that (1) it requires all the
     named keys, (2) it ensures that each value is a list or tuple, and (3) it expands via repetition any
@@ -63,9 +64,9 @@ class Header:
                     self.dictionary[key] = self.dictionary[key] * len(filenames)
 
     def keys(self):
-        """The method that returns the keys of the key-value pairs stored by histomics-stream.ds-init.Header."""
+        """The method that returns the keys of the key-value pairs stored by histomics_stream.ds.init.Header."""
         return self.dictionary.keys()
 
     def __getitem__(self, key):
-        """The method that returns the value corresponding to a key by histomics-stream.ds-init.Header."""
+        """The method that returns the value corresponding to a key by histomics_stream.ds.init.Header."""
         return self.dictionary[key]

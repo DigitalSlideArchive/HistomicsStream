@@ -1,6 +1,6 @@
 """Whole-slide image file reader for TensorFlow.
 
-The histomics-stream.codecs module supplies codecs that are useful for Zarr file storage with jpeg or
+The histomics_stream.codecs module supplies codecs that are useful for Zarr file storage with jpeg or
 jpeg2k compression.
 
 """

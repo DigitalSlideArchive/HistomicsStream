@@ -1,7 +1,7 @@
 """Whole-slide image file reader for TensorFlow.
 
-The histomics-stream.dsm-wsi module supports transformations that operate on a tensorflow.data.Dataset
-that has one record per whole-slide image.  This module defines objects that can be supplied to the
+The histomics_stream.dsm.wsi module supports transformations that operate on a tensorflow.data.Dataset
+that has one element per whole-slide image.  This module defines objects that can be supplied to the
 tf.data.Dataset.map() method.
 
 """
@@ -19,7 +19,7 @@ import zarr
 class Header:
     """A class used to initialize a tensorflow.data.Dataset.
 
-    An instance of class histomics-stream.dsm-wsi.Header can be cast to dict and supplied to
+    An instance of class histomics_stream.dsm.wsi.Header can be cast to dict and supplied to
     tensorflow.data.Dataset.from_tensor_slices to create an instance of a tensorflow dataset object.
     The primary functionality of this class over an ordinary dictionary is that (1) it requires all the
     named keys, (2) it ensures that each value is a list or tuple, and (3) it expands via repetition any
@@ -77,22 +77,22 @@ class Header:
                     self.dictionary[key] = self.dictionary[key] * len(filenames)
 
     def keys(self):
-        """The method that returns the keys of the key-value pairs stored by histomics-stream.dsm-wsi.Header."""
+        """The method that returns the keys of the key-value pairs stored by histomics_stream.dsm.wsi.Header."""
         return self.dictionary.keys()
 
     def __getitem__(self, key):
-        """The method that returns the value corresponding to a key by histomics-stream.dsm-wsi.Header."""
+        """The method that returns the value corresponding to a key by histomics_stream.dsm.wsi.Header."""
         return self.dictionary[key]
 
 
 class NoOp:
     """A class that does nothing that can be supplied to tensorflow.dataset.map
 
-    An instance of class histomics-stream.dsm-wsi.NoOp can be supplied as an argument to
+    An instance of class histomics_stream.dsm.wsi.NoOp can be supplied as an argument to
     tensorflow.dataset.map.  It is a "no operation" callable that accepts a single argument.
 
     This implementation is generic enough that the class can also be used at tensorflow workflow stages
-    other than histomics-stream.dsm-wsi.
+    other than histomics_stream.dsm.wsi.
 
     """
 
@@ -105,15 +105,15 @@ class NoOp:
 class Print:
     """A class that does nothing but print that can be supplied to tensorflow.dataset.map
 
-    An instance of class histomics-stream.dsm-wsi.Print can be supplied as an argument to
-    tensorflow.dataset.map.  Like histomics-stream.dsm-wsi.NoOp, it is a "no operation" callable that
+    An instance of class histomics_stream.dsm.wsi.Print can be supplied as an argument to
+    tensorflow.dataset.map.  Like histomics_stream.dsm.wsi.NoOp, it is a "no operation" callable that
     accepts a single argument, though it has side effects in that it prints.  It demonstrates that
     tensorflow graph functionality is working by printing at tensorflow-graph trace time and at
     tensorflow-graph run time.  It also demonstrates that tensorflow graph functionality is properly
     handling the information flow from __init__ to __call__.
 
     This implementation is generic enough that the class can also be used at tensorflow workflow stages
-    other than histomics-stream.dsm-wsi.
+    other than histomics_stream.dsm.wsi.
 
     Notes
     -----
@@ -125,25 +125,25 @@ class Print:
 
     def __init__(self, member):
         self.member = member
-        tf.print("Running histomics-stream.dsm-wsi.Print.__init__, with member = ", self.member)
-        print("Tracing histomics-stream.dsm-wsi.Print.__init__")
+        tf.print("Running histomics_stream.dsm.wsi.Print.__init__, with member = ", self.member)
+        print("Tracing histomics_stream.dsm.wsi.Print.__init__")
 
     @tf.function
     def __call__(self, elem):
         """This method is called by tensorflow to do the work of this class."""
 
-        tf.print("Running histomics-stream.dsm-wsi.Print.__call__, with member = ", self.member)
-        print("Tracing histomics-stream.dsm-wsi.Print.__call__")
+        tf.print("Running histomics_stream.dsm.wsi.Print.__call__, with member = ", self.member)
+        print("Tracing histomics_stream.dsm.wsi.Print.__call__")
         return elem
 
 
 class ComputeReadParameters:
     """A class that computes read parameters for slides in a tensorflow dataset.
 
-    An instance of class histomics-stream.dsm-wsi.ComputeReadParameters can be supplied as an argument
-    to tensorflow.dataset.map.  histomics-stream.dsm-wsi.ComputeReadParameters computes level, factor,
+    An instance of class histomics_stream.dsm.wsi.ComputeReadParameters can be supplied as an argument
+    to tensorflow.dataset.map.  histomics_stream.dsm.wsi.ComputeReadParameters computes level, factor,
     width, and height from the inputs filename, magnification, and tolerance.
-    histomics-stream.dsm-wsi.ComputeReadParameters adds new key-value pairs to the tensorflow dictionary
+    histomics_stream.dsm.wsi.ComputeReadParameters adds new key-value pairs to the tensorflow dictionary
     for the newly computed values.  Ideally the implementation would be all tf.function (i.e., a
     tensorflow graph function); however, much of the code is via a tensorflow py_function because our
     current implementation for discerning the size of an image without reading in the pixel values uses
@@ -249,8 +249,8 @@ class ComputeReadParameters:
 class AddTileDescription:
     """A class for supplying tile size and other information that can be supplied to tensorflow.dataset.map
 
-    An instance of class histomics-stream.dsm-wsi.AddTileDescription can be supplied as an argument to
-    tensorflow.dataset.map.  histomics-stream.dsm-wsi.AddTileDescription adds new key-value pairs to the
+    An instance of class histomics_stream.dsm.wsi.AddTileDescription can be supplied as an argument to
+    tensorflow.dataset.map.  histomics_stream.dsm.wsi.AddTileDescription adds new key-value pairs to the
     tensorflow dictionary to set the desired tile width, height, width overlap, and height overlap for
     each element, and to indicate whether we want tiles even if they are fractional (aka of truncated
     size) due to partially falling off the edge of the image.  (These fractional tiles can be
@@ -313,8 +313,8 @@ class AddTileDescription:
 class ComputeResampledMask:
     """A class that uses mask information to select tiles.
 
-    An instance of class histomics-stream.dsm-wsi.ComputeResampledMask can be supplied as an argument to
-    tensorflow.dataset.map.  histomics-stream.dsm-wsi.ComputeResampledMask reads in a supplied mask and
+    An instance of class histomics_stream.dsm.wsi.ComputeResampledMask can be supplied as an argument to
+    tensorflow.dataset.map.  histomics_stream.dsm.wsi.ComputeResampledMask reads in a supplied mask and
     upsamples or downsamples it if necessary so that there is exactly one pixel in the mask for each
     tile in the input image.  Note that we are assuming that this will take care of any aspects related
     to the overlapping of tiles.  Subsequent to that, we will not be looking at the mask pixels for
@@ -417,8 +417,8 @@ class ComputeResampledMask:
 class ComputeChunkPositions:
     """A class for computing the locations of chunks to be read from a whole slide.
 
-    An instance of class histomics-stream.dsm-wsi.ComputeChunkPositions can be supplied as an argument
-    to tensorflow.dataset.map.  histomics-stream.dsm-wsi.ComputeChunkPositions figures out what the read
+    An instance of class histomics_stream.dsm.wsi.ComputeChunkPositions can be supplied as an argument
+    to tensorflow.dataset.map.  histomics_stream.dsm.wsi.ComputeChunkPositions figures out what the read
     chunks will be based upon the tile parameters (size, overlap, fractional).  It divvys up the mask
     into pieces corresponding to the read chunks.  Note that it is important to subsequently call
     .unbatch() when it is desired that the chunks be not batched by slide.
