@@ -156,52 +156,52 @@ class ReadAndSplitChunk:
                 chunk = np.array(
                     os_obj.read_region((x.numpy(), y.numpy()), level.numpy(), (w.numpy(), h.numpy()))
                 )
-            elif True:
-                # Use fsspec to read the SVS image
-                # This is NOT working code!!!
-                with fsspec.open(filename) as store:
-                    source_group = zarr.open(store, mode="r")
-                    # Zarr formats other than using zarr-jpeg package have shape (height, width, colors)
-                    # using order="C".
-                    chunk = source_group[format(level.numpy())][
-                        y.numpy() : (y.numpy() + h.numpy()),
-                        x.numpy() : (x.numpy() + w.numpy()),
-                        :,
-                    ]
-            elif False:
-                # Read the SVS image with napari_lazy_openslide.lazy_openslide.OpenSlideStore
-                store = OpenSlideStore(filename, tilesize=2048)
-                source_group = zarr.open(store, mode="r")
-                # Zarr formats other than zarr-jpeg have shape (height, width, colors) using order="C".
-                chunk = source_group[format(level.numpy())][
-                    y.numpy() : (y.numpy() + h.numpy()),
-                    x.numpy() : (x.numpy() + w.numpy()),
-                    :,
-                ]
-            else:
-                # Use tifffile to read the SVS image 'aszarr'
-                # store = tifffile.imread(filename)
-                store = tifffile.imread(filename, aszarr=True)
-                # store = tifffile.imread(filename, aszarr=True, chunkmode="page")
-                source_group = zarr.open(store, mode="r")
-                chunk = source_group[format(level.numpy())][
-                    y.numpy() : (y.numpy() + h.numpy()),
-                    x.numpy() : (x.numpy() + w.numpy()),
-                    :,
-                ]
+            # elif True:
+            #     # Use fsspec to read the SVS image
+            #     # This is NOT working code!!!
+            #     with fsspec.open(filename) as store:
+            #         source_group = zarr.open(store, mode="r")
+            #         # Zarr formats other than using zarr-jpeg package have shape (height, width, colors)
+            #         # using order="C".
+            #         chunk = source_group[format(level.numpy())][
+            #             y.numpy() : (y.numpy() + h.numpy()),
+            #             x.numpy() : (x.numpy() + w.numpy()),
+            #             :,
+            #         ]
+            # elif False:
+            #     # Read the SVS image with napari_lazy_openslide.lazy_openslide.OpenSlideStore
+            #     store = OpenSlideStore(filename, tilesize=2048)
+            #     source_group = zarr.open(store, mode="r")
+            #     # Zarr formats other than zarr-jpeg have shape (height, width, colors) using order="C".
+            #     chunk = source_group[format(level.numpy())][
+            #         y.numpy() : (y.numpy() + h.numpy()),
+            #         x.numpy() : (x.numpy() + w.numpy()),
+            #         :,
+            #     ]
+            # else:
+            #     # Use tifffile to read the SVS image 'aszarr'
+            #     # store = tifffile.imread(filename)
+            #     store = tifffile.imread(filename, aszarr=True)
+            #     # store = tifffile.imread(filename, aszarr=True, chunkmode="page")
+            #     source_group = zarr.open(store, mode="r")
+            #     chunk = source_group[format(level.numpy())][
+            #         y.numpy() : (y.numpy() + h.numpy()),
+            #         x.numpy() : (x.numpy() + w.numpy()),
+            #         :,
+            #     ]
 
-        elif re.compile(r"\.zarr$").search(filename):
-            # `filename` is a directory that stores an image in Zarr format.
-            store = zarr.DirectoryStore(filename)
-            source_group = zarr.open(store, mode="r")
-            # Zarr formats other than using zarr-jpeg package have shape (height, width, colors) using
-            # order="C".
-            chunk = source_group[format(level.numpy())][
-                y.numpy() : (y.numpy() + h.numpy()),
-                x.numpy() : (x.numpy() + w.numpy()),
-                :,
-            ]
-            # Do chunk width and height need to be transposed to be consistent with SVS?!!!
+        # elif re.compile(r"\.zarr$").search(filename):
+        #     # `filename` is a directory that stores an image in Zarr format.
+        #     store = zarr.DirectoryStore(filename)
+        #     source_group = zarr.open(store, mode="r")
+        #     # Zarr formats other than using zarr-jpeg package have shape (height, width, colors) using
+        #     # order="C".
+        #     chunk = source_group[format(level.numpy())][
+        #         y.numpy() : (y.numpy() + h.numpy()),
+        #         x.numpy() : (x.numpy() + w.numpy()),
+        #         :,
+        #     ]
+        #     # Do chunk width and height need to be transposed to be consistent with SVS?!!!
 
         else:
             pil_obj = Image.open(filename)
