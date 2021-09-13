@@ -9,7 +9,7 @@ objects that can be supplied to the tf.data.Dataset.map() method.
 
 from napari_lazy_openslide import OpenSlideStore
 from PIL import Image
-import fsspec
+# import fsspec
 import numpy as np
 import openslide as os
 import re

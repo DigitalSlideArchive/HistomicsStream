@@ -1,6 +1,6 @@
 """Whole-slide image streamer for TensorFlow."""
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 """
 
@@ -11,8 +11,6 @@ This module supports efficient whole-slide reading and processing in a tensorflo
 from os import makedirs
 from PIL import Image
 import h5py
-import histomics_stream as hs
-import histomics_stream.ds.init, histomics_stream.dsm.wsi, histomics_stream.dsm.chunk, histomics_stream.codecs
 import itk
 import numpy as np
 import openslide as os
@@ -20,6 +18,7 @@ import random
 import re
 import tensorflow as tf
 import time
+from . import ds, dsm, codecs
 
 
 def _merge_dist_tensor(strategy, distributed, axis=0):
@@ -2332,7 +2331,7 @@ def read_example(devices, strategy):
     print(f"all_masks = {all_masks}")
 
     header = dict(
-        hs.ds.init.Header(
+        ds.init.Header(
             slides="TCGA-BH-A0BZ-01Z-00-DX1",
             filenames=all_wsi_images,
             cases="TCGA-BH-A0BZ",
@@ -2346,23 +2345,23 @@ def read_example(devices, strategy):
 
     # For the desired magnification, find the best level stored in the image file, and its associated
     # factor, width, and height.
-    compute_read_parameters = hs.dsm.wsi.ComputeReadParameters()
+    compute_read_parameters = dsm.wsi.ComputeReadParameters()
     tiles = tiles.map(compute_read_parameters)
 
     # Specify size, overlap, etc. information about the tiles that we want to analyze.
-    add_tile_description = hs.dsm.wsi.AddTileDescription()
+    add_tile_description = dsm.wsi.AddTileDescription()
     tiles = tiles.map(add_tile_description)
 
     # If there are any then read in the masks, one per slide, that specify tile selction.  If they are
     # not already then downsample (or upsample) the masks to be one pixel per tile.
-    compute_resampled_mask = hs.dsm.wsi.ComputeResampledMask()
+    compute_resampled_mask = dsm.wsi.ComputeResampledMask()
     tiles = tiles.map(compute_resampled_mask, **dataset_map_options)
 
     # Split each element (e.g. each slide) into a batch of multiple rows, one per chunk to be read.
     # Note that the width `cw` or height `ch` of a row (chunk) may decreased from the requested value if
     # a chunk is near the edge of an image.  Note that it is important to call `.unbatch()` when it is
     # desired that the chunks be not batched by slide.
-    compute_chunk_positions = hs.dsm.wsi.ComputeChunkPositions()
+    compute_chunk_positions = dsm.wsi.ComputeChunkPositions()
     tiles = (
         tiles.map(compute_chunk_positions, **dataset_map_options)
         .prefetch(tf.data.experimental.AUTOTUNE)
@@ -2370,16 +2369,16 @@ def read_example(devices, strategy):
     )
 
     # For debugging purposes, do a step that does nothing
-    tfd_no_op = hs.dsm.wsi.NoOp()
+    tfd_no_op = dsm.wsi.NoOp()
     tiles = tiles.map(tfd_no_op)
 
     # For debugging purposes, do a step that does nothing but print side effects.
-    # tfd_print = hs.dsm.wsi.Print(tf.constant(314, dtype=tf.int32))
+    # tfd_print = dsm.wsi.Print(tf.constant(314, dtype=tf.int32))
     # tiles = tiles.map(tfd_print)
 
     # Read and split the chunks into the tile size we want.  Note that it is important to call
     # `.unbatch()` when it is desired that the tiles be not batched by chunk.
-    read_and_split_chunk = hs.dsm.chunk.ReadAndSplitChunk()
+    read_and_split_chunk = dsm.chunk.ReadAndSplitChunk()
     tiles = (
         tiles.map(read_and_split_chunk, **dataset_map_options)
         .prefetch(tf.data.experimental.AUTOTUNE)
