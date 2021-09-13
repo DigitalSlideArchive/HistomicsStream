@@ -172,12 +172,12 @@ class ComputeReadParameters:
         response = {**elem, "level": level, "factor": factor, "width": width, "height": height}
         return response
 
-    def _py_compute_read_parameters(self, filenameIn, magnificationIn, toleranceIn):
+    def _py_compute_read_parameters(self, filename_in, magnification_in, tolerance_in):
         """This method is the internal py_function (i.e. not @tf.function) that does the actual work of this class."""
 
-        filename = filenameIn.numpy().decode("utf-8")
-        magnification = magnificationIn.numpy()
-        tolerance = toleranceIn.numpy()
+        filename = filename_in.numpy().decode("utf-8")
+        magnification = magnification_in.numpy()
+        tolerance = tolerance_in.numpy()
 
         if re.compile(r"\.svs$").search(filename):
             # read whole-slide image file and create openslide object
@@ -351,20 +351,20 @@ class ComputeResampledMask:
             return elem
 
     def _py_compute_resampled_mask(
-        self, mask_filenameIn, widthIn, heightIn, cwfIn, chfIn, twIn, thIn, owIn, ohIn, fractionalIn
+        self, mask_filename_in, width_in, height_in, cwf_in, chf_in, tw_in, th_in, ow_in, oh_in, fractional_in
     ):
         """This method is the internal py_function (i.e. not @tf.function) that does much of the actual work of this class."""
 
-        mask_filename = mask_filenameIn.numpy().decode("utf-8")
-        width = widthIn.numpy()
-        height = heightIn.numpy()
-        cwf = cwfIn.numpy()
-        chf = chfIn.numpy()
-        tw = twIn.numpy()
-        th = thIn.numpy()
-        ow = owIn.numpy()
-        oh = ohIn.numpy()
-        fractional = fractionalIn.numpy()
+        mask_filename = mask_filename_in.numpy().decode("utf-8")
+        width = width_in.numpy()
+        height = height_in.numpy()
+        cwf = cwf_in.numpy()
+        chf = chf_in.numpy()
+        tw = tw_in.numpy()
+        th = th_in.numpy()
+        ow = ow_in.numpy()
+        oh = oh_in.numpy()
+        fractional = fractional_in.numpy()
 
         left_bound = max(0, width - ow if fractional else width - tw + 1)
         top_bound = max(0, height - oh if fractional else height - th + 1)

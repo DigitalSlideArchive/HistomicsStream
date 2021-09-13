@@ -21,3 +21,5 @@ Launch `python3`, import the histomics_stream package, and use it
 ```python
 import histomics_stream as hs
 ```
+
+This has been tested with `tensorflow:2.2.0-gpu`.

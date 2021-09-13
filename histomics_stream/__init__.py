@@ -2546,12 +2546,12 @@ def _convert_openslide_to_chunks(
     os_obj = os.OpenSlide(svs_filename)
     level = 0
     width, height = os_obj.level_dimensions[level]
-    chunk_left = range(0, width - tileSize + 1, chunk_size - overlap)
+    chunk_left = range(0, width - tile_size + 1, chunk_size - overlap)
     chunk_right = [min(left + chunk_size, width) for left in chunk_left]
-    chunk_top = range(0, height - tileSize + 1, chunk_size - overlap)
+    chunk_top = range(0, height - tile_size + 1, chunk_size - overlap)
     chunk_bottom = [min(top + chunk_size, height) for top in chunk_top]
     for left, right in zip(chunk_left, chunk_right):
-        for top, bottom in zip(chunk_top, chunkBottom):
+        for top, bottom in zip(chunk_top, chunk_bottom):
             # Read in chunk
             chunk = np.array(os_obj.read_region((left, top), level, (right - left, bottom - top)))
             assert len(chunk.shape) == 3
