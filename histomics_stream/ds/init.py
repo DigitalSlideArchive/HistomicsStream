@@ -42,7 +42,9 @@ class Header:
 
     """
 
-    def __init__(self, slides, filenames, cases, magnifications, read_modes, mask_filenames):
+    def __init__(
+        self, slides, filenames, cases, magnifications, read_modes, mask_filenames
+    ):
         self.dictionary = {
             "slide": slides,
             "filename": filenames,

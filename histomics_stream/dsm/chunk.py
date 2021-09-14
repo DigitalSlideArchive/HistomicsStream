@@ -9,6 +9,7 @@ objects that can be supplied to the tf.data.Dataset.map() method.
 
 from napari_lazy_openslide import OpenSlideStore
 from PIL import Image
+
 # import fsspec
 import numpy as np
 import openslide as os
@@ -39,7 +40,9 @@ class ReadAndSplitChunk:
 
         left_bound = tf.maximum(
             zero32,
-            elem["cw"] - elem["ow"] if elem["fractional"] else elem["cw"] - elem["tw"] + one32,
+            elem["cw"] - elem["ow"]
+            if elem["fractional"]
+            else elem["cw"] - elem["tw"] + one32,
         )
         tile_left = tf.range(zero32, left_bound, elem["tw"] - elem["ow"])
         tile_right = tf.clip_by_value(tile_left + elem["tw"], zero32, elem["cw"])
@@ -47,7 +50,9 @@ class ReadAndSplitChunk:
 
         top_bound = tf.maximum(
             zero32,
-            elem["ch"] - elem["oh"] if elem["fractional"] else elem["ch"] - elem["th"] + one32,
+            elem["ch"] - elem["oh"]
+            if elem["fractional"]
+            else elem["ch"] - elem["th"] + one32,
         )
         tile_top = tf.range(zero32, top_bound, elem["th"] - elem["oh"])
         tile_bottom = tf.clip_by_value(tile_top + elem["th"], zero32, elem["ch"])
@@ -154,7 +159,9 @@ class ReadAndSplitChunk:
 
                 # read chunk and convert to tensor
                 chunk = np.array(
-                    os_obj.read_region((x.numpy(), y.numpy()), level.numpy(), (w.numpy(), h.numpy()))
+                    os_obj.read_region(
+                        (x.numpy(), y.numpy()), level.numpy(), (w.numpy(), h.numpy())
+                    )
                 )
             # elif True:
             #     # Use fsspec to read the SVS image
@@ -206,7 +213,9 @@ class ReadAndSplitChunk:
         else:
             pil_obj = Image.open(filename)
             chunk = np.asarray(pil_obj)[
-                x.numpy() : (x.numpy() + w.numpy()), y.numpy() : (y.numpy() + h.numpy()), :
+                x.numpy() : (x.numpy() + w.numpy()),
+                y.numpy() : (y.numpy() + h.numpy()),
+                :,
             ]
 
         # Do we want to support other than uint8?!!!

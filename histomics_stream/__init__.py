@@ -28,7 +28,9 @@ def _merge_dist_tensor(strategy, distributed, axis=0):
     if isinstance(distributed, tf.python.distribute.values.PerReplica):
         return tf.concat(strategy.experimental_local_results(distributed), axis=axis)
     else:
-        raise ValueError("Input to _merge_dist_tensor not a distributed PerReplica tensor.")
+        raise ValueError(
+            "Input to _merge_dist_tensor not a distributed PerReplica tensor."
+        )
 
 
 def _merge_dist_dict(strategy, distributed, axis=0):
@@ -61,7 +63,9 @@ def strategy_example():
     # generate network model
     with strategy.scope():
         model = tf.keras.applications.VGG16(include_top=True, weights="imagenet")
-        model = tf.keras.Model(inputs=model.input, outputs=model.get_layer("fc1").output)
+        model = tf.keras.Model(
+            inputs=model.input, outputs=model.get_layer("fc1").output
+        )
 
     print("strategy_example: %f seconds" % (time.time() - tic))
     return devices, strategy, model
@@ -2305,7 +2309,9 @@ def read_example(devices, strategy):
     # all_wsi_images = ["RGBA/zstd_compressor1024.zarr"]
     # all_wsi_images = ["RGBA/zstd_compressor2048.zarr"]
 
-    all_wsi_images = ["TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs"]
+    all_wsi_images = [
+        "TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs"
+    ]
     # all_wsi_images = ["default1024.zarr"]
     # all_wsi_images = ["default2048.zarr"]
     # all_wsi_images = ["default256.zarr"]
@@ -2327,7 +2333,9 @@ def read_example(devices, strategy):
     # build the mask name from the WSI file name, by inserting "-mask" and changing the file type to
     # "png", but generally any file name and any file type that we can read as an image will do.
 
-    all_masks = [re.sub(r"^(.*)\.([^\.]*)$", r"\1-mask.png", wsi) for wsi in all_wsi_images]
+    all_masks = [
+        re.sub(r"^(.*)\.([^\.]*)$", r"\1-mask.png", wsi) for wsi in all_wsi_images
+    ]
     print(f"all_masks = {all_masks}")
 
     header = dict(
@@ -2465,7 +2473,9 @@ def output_example(features, metadata):
             dtype=h5py.string_dtype(encoding="ascii"),
         )
         handle.create_dataset("features", data=features.numpy(), dtype="float")
-        handle.create_dataset("slideIdx", data=np.zeros(metadata["slide"].shape), dtype="int")
+        handle.create_dataset(
+            "slideIdx", data=np.zeros(metadata["slide"].shape), dtype="int"
+        )
         handle.create_dataset("x_centroid", data=metadata["tx"].numpy(), dtype="float")
         handle.create_dataset("y_centroid", data=metadata["ty"].numpy(), dtype="float")
         handle.create_dataset("dataIdx", data=np.zeros(1), dtype="int")
@@ -2552,7 +2562,9 @@ def _convert_openslide_to_chunks(
     for left, right in zip(chunk_left, chunk_right):
         for top, bottom in zip(chunk_top, chunk_bottom):
             # Read in chunk
-            chunk = np.array(os_obj.read_region((left, top), level, (right - left, bottom - top)))
+            chunk = np.array(
+                os_obj.read_region((left, top), level, (right - left, bottom - top))
+            )
             assert len(chunk.shape) == 3
             assert 3 <= chunk.shape[2] <= 4
             # Make sure that we have RGB rather than RGBA

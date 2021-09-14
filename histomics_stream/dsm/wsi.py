@@ -55,7 +55,9 @@ class Header:
 
     """
 
-    def __init__(self, slides, filenames, cases, magnifications, read_modes, mask_filenames):
+    def __init__(
+        self, slides, filenames, cases, magnifications, read_modes, mask_filenames
+    ):
         self.dictionary = {
             "slide": slides,
             "filename": filenames,
@@ -125,14 +127,20 @@ class Print:
 
     def __init__(self, member):
         self.member = member
-        tf.print("Running histomics_stream.dsm.wsi.Print.__init__, with member = ", self.member)
+        tf.print(
+            "Running histomics_stream.dsm.wsi.Print.__init__, with member = ",
+            self.member,
+        )
         print("Tracing histomics_stream.dsm.wsi.Print.__init__")
 
     @tf.function
     def __call__(self, elem):
         """This method is called by tensorflow to do the work of this class."""
 
-        tf.print("Running histomics_stream.dsm.wsi.Print.__call__, with member = ", self.member)
+        tf.print(
+            "Running histomics_stream.dsm.wsi.Print.__call__, with member = ",
+            self.member,
+        )
         print("Tracing histomics_stream.dsm.wsi.Print.__call__")
         return elem
 
@@ -169,7 +177,13 @@ class ComputeReadParameters:
             inp=[elem["filename"], elem["magnification"], self.tolerance],
             Tout=(tf.int32, tf.float32, tf.int32, tf.int32),
         )
-        response = {**elem, "level": level, "factor": factor, "width": width, "height": height}
+        response = {
+            **elem,
+            "level": level,
+            "factor": factor,
+            "width": width,
+            "height": height,
+        }
         return response
 
     def _py_compute_read_parameters(self, filename_in, magnification_in, tolerance_in):
@@ -190,7 +204,9 @@ class ComputeReadParameters:
             estimated = np.array(objective / os_obj.level_downsamples)
 
             # Find best level to use and its factor
-            level, factor = self._get_level_and_factor(magnification, estimated, tolerance)
+            level, factor = self._get_level_and_factor(
+                magnification, estimated, tolerance
+            )
 
             # get slide width, height at desired magnification. (Note width before height)
             width, height = os_obj.level_dimensions[level]
@@ -207,7 +223,9 @@ class ComputeReadParameters:
             estimated = np.array(objective / source_group.attrs["level_downsamples"])
 
             # Find best level to use and its factor
-            level, factor = self._get_level_and_factor(magnification, estimated, tolerance)
+            level, factor = self._get_level_and_factor(
+                magnification, estimated, tolerance
+            )
 
             # get slide width, height at desired magnification. (Note height before width)
             height, width = source_group[format(level)].shape[0:2]
@@ -351,7 +369,17 @@ class ComputeResampledMask:
             return elem
 
     def _py_compute_resampled_mask(
-        self, mask_filename_in, width_in, height_in, cwf_in, chf_in, tw_in, th_in, ow_in, oh_in, fractional_in
+        self,
+        mask_filename_in,
+        width_in,
+        height_in,
+        cwf_in,
+        chf_in,
+        tw_in,
+        th_in,
+        ow_in,
+        oh_in,
+        fractional_in,
     ):
         """This method is the internal py_function (i.e. not @tf.function) that does much of the actual work of this class."""
 
@@ -379,8 +407,18 @@ class ComputeResampledMask:
         # The new size is one pixel per tile
         resampled_width = int(np.floor((left_bound - 1) / (tw - ow)) + 1)
         resampled_height = int(np.floor((top_bound - 1) / (th - oh)) + 1)
-        if abs(math.log((resampled_width / mask.shape[2]) / (resampled_height / mask.shape[1]))) > 0.20:
-            raise ValueError("The mask aspect ratio does not match the image aspect ratio.")
+        if (
+            abs(
+                math.log(
+                    (resampled_width / mask.shape[2])
+                    / (resampled_height / mask.shape[1])
+                )
+            )
+            > 0.20
+        ):
+            raise ValueError(
+                "The mask aspect ratio does not match the image aspect ratio."
+            )
         resampled_shape = (resampled_height, resampled_width)
         # Perform the resampling
         resampled = tf.image.resize(mask, resampled_shape)[0, ...]
@@ -438,14 +476,18 @@ class ComputeChunkPositions:
         # be as large as left_bound because chunks contain a whole number of tiles.
         left_bound = tf.maximum(
             zero,
-            elem["width"] - elem["ow"] if elem["fractional"] else elem["width"] - elem["tw"] + one,
+            elem["width"] - elem["ow"]
+            if elem["fractional"]
+            else elem["width"] - elem["tw"] + one,
         )
         chunk_left = tf.range(zero, left_bound, chunk_width - elem["ow"])
         chunk_right = tf.clip_by_value(chunk_left + chunk_width, zero, elem["width"])
 
         top_bound = tf.maximum(
             zero,
-            elem["height"] - elem["oh"] if elem["fractional"] else elem["height"] - elem["th"] + one,
+            elem["height"] - elem["oh"]
+            if elem["fractional"]
+            else elem["height"] - elem["th"] + one,
         )
         chunk_top = tf.range(zero, top_bound, chunk_height - elem["oh"])
         chunk_bottom = tf.clip_by_value(chunk_top + chunk_height, zero, elem["height"])
