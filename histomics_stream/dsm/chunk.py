@@ -85,20 +85,24 @@ class ReadAndSplitChunk:
                 Tout=tf.uint8,
             )
 
-            condition = lambda i, _: tf.less(i, len)
-            body = lambda i, tiles: (
-                i + 1,
-                tiles.write(
-                    i,
-                    tf.image.crop_to_bounding_box(
-                        chunk,
-                        tf.gather(y, i),
-                        tf.gather(x, i),
-                        tf.gather(h, i),
-                        tf.gather(w, i),
+            def condition(i, _):
+                return tf.less(i, len)
+
+            def body(i, tiles):
+                return (
+                    i + 1,
+                    tiles.write(
+                        i,
+                        tf.image.crop_to_bounding_box(
+                            chunk,
+                            tf.gather(y, i),
+                            tf.gather(x, i),
+                            tf.gather(h, i),
+                            tf.gather(w, i),
+                        ),
                     ),
-                ),
-            )
+                )
+
             _, tiles = tf.while_loop(condition, body, [0, tiles])
             del chunk
 

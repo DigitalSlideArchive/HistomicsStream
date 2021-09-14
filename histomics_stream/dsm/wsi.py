@@ -518,20 +518,24 @@ class ComputeChunkPositions:
             len = tf.size(mask_x)
 
             # mask_chunks = [elem["mask_wsi"][y:(y+h), x:(x+w)] for x, y, w, h in zip(mask_x, mask_w, mask_y, mask_h)]
-            condition = lambda i, _: tf.less(i, len)
-            body = lambda i, mask_chunks: (
-                i + 1,
-                mask_chunks.write(
-                    i,
-                    tf.image.crop_to_bounding_box(
-                        elem["mask_wsi"],
-                        tf.gather(mask_y, i),
-                        tf.gather(mask_x, i),
-                        tf.gather(mask_h, i),
-                        tf.gather(mask_w, i),
+            def condition(i, _):
+                return tf.less(i, len)
+
+            def body(i, mask_chunks):
+                return (
+                    i + 1,
+                    mask_chunks.write(
+                        i,
+                        tf.image.crop_to_bounding_box(
+                            elem["mask_wsi"],
+                            tf.gather(mask_y, i),
+                            tf.gather(mask_x, i),
+                            tf.gather(mask_h, i),
+                            tf.gather(mask_w, i),
+                        ),
                     ),
-                ),
-            )
+                )
+
             _, mask_chunks = tf.while_loop(condition, body, [0, mask_chunks])
 
         mask_chunks = mask_chunks.stack()
