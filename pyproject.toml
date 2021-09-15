@@ -1,27 +1,7 @@
 [build-system]
 requires = [
+         "setuptools>=42",
+         "wheel",
          "flit_core >=2,<4",
          ]
-build-backend = "flit_core.buildapi"
-
-[tool.flit.metadata]
-module = "histomics_stream"
-author = "Lee Newberg"
-author-email = "lee.newberg@kitware.com"
-home-page = "https://github.com/DigitalSlideArchive/histomics_stream"
-requires = [
-         "fsspec",
-         "h5py",
-         "imagecodecs",
-         "itk",
-         "napari-lazy-openslide",
-         "numcodecs",
-         "numpy",
-         "openslide-python",
-         "Pillow",
-         "tensorflow-gpu",
-         "tifffile",
-         "zarr",
-         ]
-description-file = "README.md"
-classifiers = ["License :: OSI Approved :: Apache Software License"]
+build-backend = "setuptools.build_meta"
