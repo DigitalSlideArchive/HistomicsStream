@@ -28,11 +28,15 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Install basic dependencies
         run: |
           sudo apt install python3-openslide
           python -m pip install --upgrade pip setuptools wheel
           pip install flake8 pytest itk==${{ matrix.itk-python-git-tag }}
+
+      - name: Install tensorflow
+        run: |
+          pip install tensorflow
 
       - name: Install histomics_stream
         run: |
