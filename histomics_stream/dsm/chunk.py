@@ -71,6 +71,7 @@ class ReadAndSplitChunk:
 
         # Handle the case that we need to read from disk
         read_chunk = not mask_chunk_supplied or tf.math.reduce_any(mask_chunk)
+        chunk = tf.constant(0, dtype=tf.uint8)
         if read_chunk:
             chunk = tf.py_function(
                 func=self._py_read_chunk,
@@ -104,7 +105,6 @@ class ReadAndSplitChunk:
                 )
 
             _, tiles = tf.while_loop(condition, body, [0, tiles])
-            del chunk
 
         tiles = tiles.stack()
 
