@@ -24,13 +24,15 @@ from . import ds, dsm, codecs
 def _merge_dist_tensor(strategy, distributed, axis=0):
     """A helper function for predict_example."""
 
-    # check if input is type produced by distributed.Strategy.run
-    if isinstance(distributed, tf.python.distribute.values.PerReplica):
-        return tf.concat(strategy.experimental_local_results(distributed), axis=axis)
-    else:
-        raise ValueError(
-            "Input to _merge_dist_tensor not a distributed PerReplica tensor."
-        )
+    return tf.concat(strategy.experimental_local_results(distributed), axis=axis)
+    # print("type(distributed) = ", type(distributed))
+    # # check if input is type produced by distributed.Strategy.run
+    # if isinstance(distributed, tf.python.distribute.values.PerReplica):
+    #     return tf.concat(strategy.experimental_local_results(distributed), axis=axis)
+    # else:
+    #     raise ValueError(
+    #         "Input to _merge_dist_tensor not a distributed PerReplica tensor."
+    #     )
 
 
 def _merge_dist_dict(strategy, distributed, axis=0):
