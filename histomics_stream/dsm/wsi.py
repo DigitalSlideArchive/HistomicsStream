@@ -397,29 +397,38 @@ class ComputeResampledMask:
         left_bound = max(0, width - ow if fractional else width - tw + 1)
         top_bound = max(0, height - oh if fractional else height - th + 1)
 
-        # Read in an image from the supplied file name for the mask
-        mask_itk = itk.imread(mask_filename)
-        if mask_itk.GetImageDimension() != 2:
-            raise ValueError("The mask should be a 2-dimensional image.")
-        mask = tf.constant(itk.array_from_image(mask_itk))
-        # Add batch and channels dimensions
-        mask = mask[tf.newaxis, ..., tf.newaxis]
-        # The new size is one pixel per tile
+        # The desired mask size is one pixel per tile
         resampled_width = int(np.floor((left_bound - 1) / (tw - ow)) + 1)
         resampled_height = int(np.floor((top_bound - 1) / (th - oh)) + 1)
-        if (
-            abs(
-                math.log(
-                    (resampled_width / mask.shape[2])
-                    / (resampled_height / mask.shape[1])
-                )
-            )
-            > 0.20
-        ):
-            raise ValueError(
-                "The mask aspect ratio does not match the image aspect ratio."
-            )
         resampled_shape = (resampled_height, resampled_width)
+        # By default assume that all tiles will be retained.
+        mask = tf.convert_to_tensor(
+            np.ones((resampled_height, resampled_width, 1), dtype=np.bool),
+            dtype=tf.bool,
+        )
+
+        if mask_filename != "":
+            # Read in an image from the supplied file name for the mask
+            mask_itk = itk.imread(mask_filename)
+            if mask_itk.GetImageDimension() != 2:
+                raise ValueError("The mask should be a 2-dimensional image.")
+            mask = tf.constant(itk.array_from_image(mask_itk))
+
+            # Add batch and channels dimensions
+            mask = mask[tf.newaxis, ..., tf.newaxis]
+            if (
+                abs(
+                    math.log(
+                        (resampled_width / mask.shape[2])
+                        / (resampled_height / mask.shape[1])
+                    )
+                )
+                > 0.20
+            ):
+                raise ValueError(
+                    "The mask aspect ratio does not match the image aspect ratio."
+                )
+
         # Perform the resampling
         resampled = tf.image.resize(mask, resampled_shape)[0, ...]
 
