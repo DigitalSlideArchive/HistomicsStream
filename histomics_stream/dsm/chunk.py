@@ -70,7 +70,7 @@ class ReadAndSplitChunk:
             mask_chunk = elem["mask_chunk"]
 
         # Handle the case that we need to read from disk
-        read_chunk = not mask_chunk_supplied or tf.math.reduce_any(mask_chunk)
+        read_chunk = not mask_chunk_supplied or tf.math.reduce_max(mask_chunk) > 0
         chunk = tf.constant(0, dtype=tf.uint8)
         if read_chunk:
             chunk = tf.py_function(
