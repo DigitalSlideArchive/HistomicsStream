@@ -362,7 +362,7 @@ class ComputeResampledMask:
                     elem["oh"],
                     elem["fractional"],
                 ],
-                Tout=tf.bool,
+                Tout=tf.uint8,
             )
             return {**elem, "mask_wsi": mask_wsi}
         else:
@@ -397,29 +397,38 @@ class ComputeResampledMask:
         left_bound = max(0, width - ow if fractional else width - tw + 1)
         top_bound = max(0, height - oh if fractional else height - th + 1)
 
-        # Read in an image from the supplied file name for the mask
-        mask_itk = itk.imread(mask_filename)
-        if mask_itk.GetImageDimension() != 2:
-            raise ValueError("The mask should be a 2-dimensional image.")
-        mask = tf.constant(itk.array_from_image(mask_itk))
-        # Add batch and channels dimensions
-        mask = mask[tf.newaxis, ..., tf.newaxis]
-        # The new size is one pixel per tile
+        # The desired mask size is one pixel per tile
         resampled_width = int(np.floor((left_bound - 1) / (tw - ow)) + 1)
         resampled_height = int(np.floor((top_bound - 1) / (th - oh)) + 1)
-        if (
-            abs(
-                math.log(
-                    (resampled_width / mask.shape[2])
-                    / (resampled_height / mask.shape[1])
-                )
-            )
-            > 0.20
-        ):
-            raise ValueError(
-                "The mask aspect ratio does not match the image aspect ratio."
-            )
         resampled_shape = (resampled_height, resampled_width)
+        # By default assume that all tiles will be retained.
+        mask = tf.convert_to_tensor(
+            np.ones((resampled_height, resampled_width, 1), dtype=np.uint8),
+            dtype=tf.uint8,
+        )
+
+        if mask_filename != "":
+            # Read in an image from the supplied file name for the mask
+            mask_itk = itk.imread(mask_filename)
+            if mask_itk.GetImageDimension() != 2:
+                raise ValueError("The mask should be a 2-dimensional image.")
+            mask = tf.constant(itk.array_from_image(mask_itk), dtype=tf.uint8)
+
+            # Add batch and channels dimensions
+            mask = mask[tf.newaxis, ..., tf.newaxis]
+            if (
+                abs(
+                    math.log(
+                        (resampled_width / mask.shape[2])
+                        / (resampled_height / mask.shape[1])
+                    )
+                )
+                > 0.20
+            ):
+                raise ValueError(
+                    "The mask aspect ratio does not match the image aspect ratio."
+                )
+
         # Perform the resampling
         resampled = tf.image.resize(mask, resampled_shape)[0, ...]
 
@@ -428,7 +437,7 @@ class ComputeResampledMask:
         # multiples of those values.
         # * Also, we reshape so that the mask has shape (padded_height, padded_width, channels) where
         # channels = 1.
-        # * Also, we cast the array to type np.bool.  (Note that we use a formula with floor() rather than a
+        # * Also, we cast the array to type np.uint8.  (Note that we use a formula with floor() rather than a
         # formula with ceil() so that we get the same answer with float or integer division for the
         # argument.)
         padded_resampled = np.zeros(
@@ -437,7 +446,7 @@ class ComputeResampledMask:
                 int((tf.math.floor((resampled_shape[1] - 1) / cwf) + 1) * cwf),
                 1,
             ),
-            dtype=np.bool,
+            dtype=np.uint8,
         )
         padded_resampled[
             : resampled_shape[0],
@@ -503,7 +512,7 @@ class ComputeChunkPositions:
         # padded if necessary.
         has_mask = "mask_wsi" in elem.keys()
 
-        mask_chunks = tf.TensorArray(dtype=tf.bool, size=len)
+        mask_chunks = tf.TensorArray(dtype=tf.uint8, size=len)
         if has_mask:
             mask_width = tf.shape(elem["mask_wsi"])[1]
             mask_left = tf.cast(chunk_left / (elem["tw"] - elem["ow"]), dtype=tf.int32)
