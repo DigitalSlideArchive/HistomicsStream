@@ -38,22 +38,12 @@ class ReadAndSplitChunk:
         one8 = tf.constant(1, dtype=tf.uint8)
         one32 = tf.constant(1, dtype=tf.int32)
 
-        left_bound = tf.maximum(
-            zero32,
-            elem["cw"] - elem["ow"]
-            if elem["fractional"]
-            else elem["cw"] - elem["tw"] + one32,
-        )
+        left_bound = tf.maximum(zero32, elem["cw"] - elem["tw"] + one32)
         tile_left = tf.range(zero32, left_bound, elem["tw"] - elem["ow"])
         tile_right = tf.clip_by_value(tile_left + elem["tw"], zero32, elem["cw"])
         usable_mask_width = tf.size(tile_left)
 
-        top_bound = tf.maximum(
-            zero32,
-            elem["ch"] - elem["oh"]
-            if elem["fractional"]
-            else elem["ch"] - elem["th"] + one32,
-        )
+        top_bound = tf.maximum(zero32, elem["ch"] - elem["th"] + one32)
         tile_top = tf.range(zero32, top_bound, elem["th"] - elem["oh"])
         tile_bottom = tf.clip_by_value(tile_top + elem["th"], zero32, elem["ch"])
         usable_mask_height = tf.size(tile_top)
@@ -163,9 +153,7 @@ class ReadAndSplitChunk:
 
                 # read chunk and convert to tensor
                 chunk = np.array(
-                    os_obj.read_region(
-                        (x.numpy(), y.numpy()), level.numpy(), (w.numpy(), h.numpy())
-                    )
+                    os_obj.read_region((x.numpy(), y.numpy()), level.numpy(), (w.numpy(), h.numpy()))
                 )
             # elif True:
             #     # Use fsspec to read the SVS image
