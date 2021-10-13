@@ -55,9 +55,7 @@ class Header:
 
     """
 
-    def __init__(
-        self, slides, filenames, cases, magnifications, read_modes, mask_filenames
-    ):
+    def __init__(self, slides, filenames, cases, magnifications, read_modes, mask_filenames):
         self.dictionary = {
             "slide": slides,
             "filename": filenames,
@@ -79,7 +77,9 @@ class Header:
                     self.dictionary[key] = self.dictionary[key] * len(filenames)
 
     def keys(self):
-        """The method that returns the keys of the key-value pairs stored by histomics_stream.dsm.wsi.Header."""
+        """The method that returns the keys of the key-value pairs stored by
+        histomics_stream.dsm.wsi.Header.
+        """
         return self.dictionary.keys()
 
     def __getitem__(self, key):
@@ -136,7 +136,6 @@ class Print:
     @tf.function
     def __call__(self, elem):
         """This method is called by tensorflow to do the work of this class."""
-
         tf.print(
             "Running histomics_stream.dsm.wsi.Print.__call__, with member = ",
             self.member,
@@ -187,8 +186,9 @@ class ComputeReadParameters:
         return response
 
     def _py_compute_read_parameters(self, filename_in, magnification_in, tolerance_in):
-        """This method is the internal py_function (i.e. not @tf.function) that does the actual work of this class."""
-
+        """This method is the internal py_function (i.e. not @tf.function) that does the actual work of
+        this class.
+        """
         filename = filename_in.numpy().decode("utf-8")
         magnification = magnification_in.numpy()
         tolerance = tolerance_in.numpy()
@@ -204,9 +204,7 @@ class ComputeReadParameters:
             estimated = np.array(objective / os_obj.level_downsamples)
 
             # Find best level to use and its factor
-            level, factor = self._get_level_and_factor(
-                magnification, estimated, tolerance
-            )
+            level, factor = self._get_level_and_factor(magnification, estimated, tolerance)
 
             # get slide width, height at desired magnification. (Note width before height)
             width, height = os_obj.level_dimensions[level]
@@ -223,9 +221,7 @@ class ComputeReadParameters:
             estimated = np.array(objective / source_group.attrs["level_downsamples"])
 
             # Find best level to use and its factor
-            level, factor = self._get_level_and_factor(
-                magnification, estimated, tolerance
-            )
+            level, factor = self._get_level_and_factor(magnification, estimated, tolerance)
 
             # get slide width, height at desired magnification. (Note height before width)
             height, width = source_group[format(level)].shape[0:2]
@@ -265,16 +261,15 @@ class ComputeReadParameters:
 
 
 class AddTileDescription:
-    """A class for supplying tile size and other information that can be supplied to tensorflow.dataset.map
+    """A class for supplying tile size and other information that can be supplied to
+    tensorflow.dataset.map.
 
     An instance of class histomics_stream.dsm.wsi.AddTileDescription can be supplied as an argument to
     tensorflow.dataset.map.  histomics_stream.dsm.wsi.AddTileDescription adds new key-value pairs to the
     tensorflow dictionary to set the desired tile width, height, width overlap, and height overlap for
-    each element, and to indicate whether we want tiles even if they are fractional (aka of truncated
-    size) due to partially falling off the edge of the image.  (These fractional tiles can be
-    problematic because tensorflow likes its shapes to be uniform.)  chunk_width_factor and
-    chunk_height_factor indicate how many tiles are read at a time.  The primary functionality of this
-    class over an ordinary dictionary is that it sets all the required keys and no others.
+    each element.  chunk_width_factor and chunk_height_factor indicate how many tiles are read at a
+    time.  The primary functionality of this class over an ordinary dictionary is that it sets all the
+    required keys and no others.
 
     Parameters
     ----------
@@ -290,8 +285,6 @@ class AddTileDescription:
         The width of a chunk read from disk at one time as measured in number of (possibly) tiles.
     chunk_height_factor : tf.constant(, dtype=tf.int32)
         The height of a chunk read from disk at one time as measured in number of (possibly) tiles.
-    fractional : tf.constant(, dtype=tf.bool)
-        Set to True if tiles at the edges of the slide that are less than full width or full height should be retained.
 
     Notes
     -----
@@ -309,7 +302,6 @@ class AddTileDescription:
         overlap_height=tf.constant(0, dtype=tf.int32),
         chunk_width_factor=tf.constant(8, dtype=tf.int32),
         chunk_height_factor=tf.constant(8, dtype=tf.int32),
-        fractional=tf.constant(False, dtype=tf.bool),
     ):
         self.dictionary = {
             "tw": tile_width,
@@ -318,7 +310,6 @@ class AddTileDescription:
             "oh": overlap_height,
             "cwf": chunk_width_factor,
             "chf": chunk_height_factor,
-            "fractional": fractional,
         }
 
     @tf.function
@@ -337,9 +328,7 @@ class ComputeResampledMask:
     tile in the input image.  Note that we are assuming that this will take care of any aspects related
     to the overlapping of tiles.  Subsequent to that, we will not be looking at the mask pixels for
     adjacent tiles even though they may overlap with the tile being considered.  Note further that we
-    are assuming that the mask will be downsampled (or upsampled) to have one whole pixel per tile, even
-    if not every tile is whole; that is even if some are fractional tiles from the right or bottom
-    edges.
+    are assuming that the mask will be downsampled (or upsampled) to have one whole pixel per tile.
 
     """
 
@@ -360,7 +349,6 @@ class ComputeResampledMask:
                     elem["th"],
                     elem["ow"],
                     elem["oh"],
-                    elem["fractional"],
                 ],
                 Tout=tf.uint8,
             )
@@ -379,9 +367,10 @@ class ComputeResampledMask:
         th_in,
         ow_in,
         oh_in,
-        fractional_in,
     ):
-        """This method is the internal py_function (i.e. not @tf.function) that does much of the actual work of this class."""
+        """This method is the internal py_function (i.e. not @tf.function) that does much of the actual
+        work of this class.
+        """
 
         mask_filename = mask_filename_in.numpy().decode("utf-8")
         width = width_in.numpy()
@@ -392,10 +381,9 @@ class ComputeResampledMask:
         th = th_in.numpy()
         ow = ow_in.numpy()
         oh = oh_in.numpy()
-        fractional = fractional_in.numpy()
 
-        left_bound = max(0, width - ow if fractional else width - tw + 1)
-        top_bound = max(0, height - oh if fractional else height - th + 1)
+        left_bound = max(0, width - tw + 1)
+        top_bound = max(0, height - th + 1)
 
         # The desired mask size is one pixel per tile
         resampled_width = int(np.floor((left_bound - 1) / (tw - ow)) + 1)
@@ -417,17 +405,10 @@ class ComputeResampledMask:
             # Add batch and channels dimensions
             mask = mask[tf.newaxis, ..., tf.newaxis]
             if (
-                abs(
-                    math.log(
-                        (resampled_width / mask.shape[2])
-                        / (resampled_height / mask.shape[1])
-                    )
-                )
+                abs(math.log((resampled_width / mask.shape[2]) / (resampled_height / mask.shape[1])))
                 > 0.20
             ):
-                raise ValueError(
-                    "The mask aspect ratio does not match the image aspect ratio."
-                )
+                raise ValueError("The mask aspect ratio does not match the image aspect ratio.")
 
         # Perform the resampling
         resampled = tf.image.resize(mask, resampled_shape)[0, ...]
@@ -437,9 +418,9 @@ class ComputeResampledMask:
         # multiples of those values.
         # * Also, we reshape so that the mask has shape (padded_height, padded_width, channels) where
         # channels = 1.
-        # * Also, we cast the array to type np.uint8.  (Note that we use a formula with floor() rather than a
-        # formula with ceil() so that we get the same answer with float or integer division for the
-        # argument.)
+        # * Also, we cast the array to type np.uint8.  (Note that we use a formula with floor() rather
+        # than a formula with ceil() so that we get the same answer with float or integer division for
+        # the argument.)
         padded_resampled = np.zeros(
             (
                 int((tf.math.floor((resampled_shape[0] - 1) / chf) + 1) * chf),
@@ -466,9 +447,9 @@ class ComputeChunkPositions:
 
     An instance of class histomics_stream.dsm.wsi.ComputeChunkPositions can be supplied as an argument
     to tensorflow.dataset.map.  histomics_stream.dsm.wsi.ComputeChunkPositions figures out what the read
-    chunks will be based upon the tile parameters (size, overlap, fractional).  It divvys up the mask
-    into pieces corresponding to the read chunks.  Note that it is important to subsequently call
-    .unbatch() when it is desired that the chunks be not batched by slide.
+    chunks will be based upon the tile parameters (size, overlap).  It divvys up the mask into pieces
+    corresponding to the read chunks.  Note that it is important to subsequently call .unbatch() when it
+    is desired that the chunks be not batched by slide.
 
     """
 
@@ -481,23 +462,13 @@ class ComputeChunkPositions:
         chunk_width = elem["cwf"] * (elem["tw"] - elem["ow"]) + elem["ow"]
         chunk_height = elem["chf"] * (elem["th"] - elem["oh"]) + elem["oh"]
 
-        # The left side of a tile cannot be as large as left_bound.  Also, the left side of a chunk cannot
-        # be as large as left_bound because chunks contain a whole number of tiles.
-        left_bound = tf.maximum(
-            zero,
-            elem["width"] - elem["ow"]
-            if elem["fractional"]
-            else elem["width"] - elem["tw"] + one,
-        )
+        # The left side of a tile cannot be as large as left_bound.  Also, the left side of a chunk
+        # cannot be as large as left_bound because chunks contain a whole number of tiles.
+        left_bound = tf.maximum(zero, elem["width"] - elem["tw"] + one)
         chunk_left = tf.range(zero, left_bound, chunk_width - elem["ow"])
         chunk_right = tf.clip_by_value(chunk_left + chunk_width, zero, elem["width"])
 
-        top_bound = tf.maximum(
-            zero,
-            elem["height"] - elem["oh"]
-            if elem["fractional"]
-            else elem["height"] - elem["th"] + one,
-        )
+        top_bound = tf.maximum(zero, elem["height"] - elem["th"] + one)
         chunk_top = tf.range(zero, top_bound, chunk_height - elem["oh"])
         chunk_bottom = tf.clip_by_value(chunk_top + chunk_height, zero, elem["height"])
 
@@ -508,8 +479,8 @@ class ComputeChunkPositions:
         len = tf.size(cx)
 
         # If a mask was supplied, compute a mask for each chunk.  The size of a mask for a chunk will be
-        # chunk_width_factor by chunk_height_factor, even along the right or bottom border where it will be
-        # padded if necessary.
+        # chunk_width_factor by chunk_height_factor, even along the right or bottom border where it will
+        # be padded if necessary.
         has_mask = "mask_wsi" in elem.keys()
 
         mask_chunks = tf.TensorArray(dtype=tf.uint8, size=len)
