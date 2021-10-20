@@ -43,7 +43,8 @@ class Header:
     mask_filenames : str
         A list of masks for the slides.  Each slide's mask will be used to select which tiles of the
         slide to process.  If the mask does not have one pixel per tile then it will be upsampled or
-        downsampled as necessary.
+        downsampled as necessary.  An empty string indicates that no mask file is being supplied and
+        that all tiles should be retained.
 
     Notes
     -----
@@ -336,25 +337,22 @@ class ComputeResampledMask:
     def __call__(self, elem):
         """This method is called by tensorflow to do the work of this class."""
 
-        if "mask_filename" in elem.keys():
-            mask_wsi = tf.py_function(
-                func=self._py_compute_resampled_mask,
-                inp=[
-                    elem["mask_filename"],
-                    elem["width"],
-                    elem["height"],
-                    elem["cwf"],
-                    elem["chf"],
-                    elem["tw"],
-                    elem["th"],
-                    elem["ow"],
-                    elem["oh"],
-                ],
-                Tout=tf.uint8,
-            )
-            return {**elem, "mask_wsi": mask_wsi}
-        else:
-            return elem
+        mask_wsi = tf.py_function(
+            func=self._py_compute_resampled_mask,
+            inp=[
+                elem["mask_filename"],
+                elem["width"],
+                elem["height"],
+                elem["cwf"],
+                elem["chf"],
+                elem["tw"],
+                elem["th"],
+                elem["ow"],
+                elem["oh"],
+            ],
+            Tout=tf.uint8,
+        )
+        return {**elem, "mask_wsi": mask_wsi}
 
     def _py_compute_resampled_mask(
         self,
@@ -439,7 +437,8 @@ class ComputeResampledMask:
         # print(f"resampled_shape = {resampled_shape}")
         # print(f"padded_resampled.shape = {padded_resampled.shape}")
         # tf.print(padded_resampled[:8,:8,0])
-        return padded_resampled
+        response = tf.convert_to_tensor(padded_resampled, dtype=tf.uint8)
+        return response
 
 
 class ComputeChunkPositions:
@@ -476,55 +475,51 @@ class ComputeChunkPositions:
         cw = tf.tile(chunk_right - chunk_left, tf.stack([tf.size(chunk_top)]))
         cy = tf.repeat(chunk_top, tf.size(chunk_left))
         ch = tf.repeat(chunk_bottom - chunk_top, tf.size(chunk_left))
-        len = tf.size(cx)
+        chunk_len = tf.size(cx)
 
-        # If a mask was supplied, compute a mask for each chunk.  The size of a mask for a chunk will be
-        # chunk_width_factor by chunk_height_factor, even along the right or bottom border where it will
-        # be padded if necessary.
-        has_mask = "mask_wsi" in elem.keys()
+        # Compute a mask for each chunk.  The size of a mask for a chunk will be chunk_width_factor by
+        # chunk_height_factor, even along the right or bottom border where it will be padded if
+        # necessary.
 
-        mask_chunks = tf.TensorArray(dtype=tf.uint8, size=len)
-        if has_mask:
-            mask_width = tf.shape(elem["mask_wsi"])[1]
-            mask_left = tf.cast(chunk_left / (elem["tw"] - elem["ow"]), dtype=tf.int32)
-            mask_right = tf.clip_by_value(mask_left + elem["cwf"], zero, mask_width)
-            mask_height = tf.shape(elem["mask_wsi"])[0]
-            mask_top = tf.cast(chunk_top / (elem["th"] - elem["oh"]), dtype=tf.int32)
-            mask_bottom = tf.clip_by_value(mask_top + elem["chf"], zero, mask_height)
-            mask_x = tf.tile(mask_left, tf.stack([tf.size(mask_top)]))
-            mask_w = tf.tile(mask_right - mask_left, tf.stack([tf.size(mask_top)]))
-            mask_y = tf.repeat(mask_top, tf.size(mask_left))
-            mask_h = tf.repeat(mask_bottom - mask_top, tf.size(mask_left))
-            len = tf.size(mask_x)
+        mask_chunks = tf.TensorArray(dtype=tf.uint8, size=chunk_len)
+        mask_width = tf.shape(elem["mask_wsi"])[1]
+        mask_left = tf.cast(chunk_left / (elem["tw"] - elem["ow"]), dtype=tf.int32)
+        mask_right = tf.clip_by_value(mask_left + elem["cwf"], zero, mask_width)
+        mask_height = tf.shape(elem["mask_wsi"])[0]
+        mask_top = tf.cast(chunk_top / (elem["th"] - elem["oh"]), dtype=tf.int32)
+        mask_bottom = tf.clip_by_value(mask_top + elem["chf"], zero, mask_height)
+        mask_x = tf.tile(mask_left, tf.stack([tf.size(mask_top)]))
+        mask_w = tf.tile(mask_right - mask_left, tf.stack([tf.size(mask_top)]))
+        mask_y = tf.repeat(mask_top, tf.size(mask_left))
+        mask_h = tf.repeat(mask_bottom - mask_top, tf.size(mask_left))
+        mask_len = tf.size(mask_x)
 
-            # mask_chunks = [elem["mask_wsi"][y:(y+h), x:(x+w)] for x, y, w, h in zip(mask_x, mask_w, mask_y, mask_h)]
-            def condition(i, _):
-                return tf.less(i, len)
-
-            def body(i, mask_chunks):
-                return (
-                    i + 1,
-                    mask_chunks.write(
-                        i,
-                        tf.image.crop_to_bounding_box(
-                            elem["mask_wsi"],
-                            tf.gather(mask_y, i),
-                            tf.gather(mask_x, i),
-                            tf.gather(mask_h, i),
-                            tf.gather(mask_w, i),
-                        ),
-                    ),
-                )
-
-            _, mask_chunks = tf.while_loop(condition, body, [0, mask_chunks])
+        # mask_chunks = [elem["mask_wsi"][y:(y+h), x:(x+w)]
+        #                for x, y, w, h in zip(mask_x, mask_w, mask_y, mask_h)]
+        for i in tf.range(mask_len):
+            mask_chunks = mask_chunks.write(
+                i,
+                tf.image.crop_to_bounding_box(
+                    elem["mask_wsi"],
+                    tf.gather(mask_y, i),
+                    tf.gather(mask_x, i),
+                    tf.gather(mask_h, i),
+                    tf.gather(mask_w, i),
+                ),
+            )
 
         mask_chunks = mask_chunks.stack()
         response = {}
         for key in elem.keys():
             if key != "mask_wsi":
                 # Exclude mask_wsi because it is large and we now have mask_chunk.
-                response[key] = tf.repeat(elem[key], len)
-        response = {**response, "cx": cx, "cy": cy, "cw": cw, "ch": ch}
-        if has_mask:
-            response = {**response, "mask_chunk": mask_chunks}
+                response[key] = tf.repeat(elem[key], mask_len)
+        response = {
+            **response,
+            "cx": cx,
+            "cy": cy,
+            "cw": cw,
+            "ch": ch,
+            "mask_chunk": mask_chunks,
+        }
         return response
