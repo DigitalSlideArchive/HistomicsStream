@@ -55,66 +55,44 @@ class ReadAndSplitChunk:
         len = tf.size(x)
         tiles = tf.TensorArray(dtype=tf.uint8, size=len)
 
-        mask_chunk_supplied = "mask_chunk" in elem.keys()
-        if mask_chunk_supplied:
-            mask_chunk = elem["mask_chunk"]
+        mask_chunk = elem["mask_chunk"]
 
-        # Handle the case that we need to read from disk
-        read_chunk = not mask_chunk_supplied or tf.math.reduce_max(mask_chunk) > 0
-        chunk = tf.constant(0, dtype=tf.uint8)
-        if read_chunk:
-            chunk = tf.py_function(
-                func=self._py_read_chunk,
-                inp=[
-                    elem["filename"],
-                    elem["level"],
-                    elem["cx"],
-                    elem["cy"],
-                    elem["cw"],
-                    elem["ch"],
-                ],
-                Tout=tf.uint8,
+        chunk = tf.py_function(
+            func=self._py_read_chunk,
+            inp=[
+                elem["filename"],
+                elem["level"],
+                elem["cx"],
+                elem["cy"],
+                elem["cw"],
+                elem["ch"],
+            ],
+            Tout=tf.uint8,
+        )
+
+        for i in tf.range(len):
+            tiles = tiles.write(
+                i,
+                tf.image.crop_to_bounding_box(
+                    chunk,
+                    tf.gather(y, i),
+                    tf.gather(x, i),
+                    tf.gather(h, i),
+                    tf.gather(w, i),
+                ),
             )
-
-            def condition(i, _):
-                return tf.less(i, len)
-
-            def body(i, tiles):
-                return (
-                    i + 1,
-                    tiles.write(
-                        i,
-                        tf.image.crop_to_bounding_box(
-                            chunk,
-                            tf.gather(y, i),
-                            tf.gather(x, i),
-                            tf.gather(h, i),
-                            tf.gather(w, i),
-                        ),
-                    ),
-                )
-
-            _, tiles = tf.while_loop(condition, body, [0, tiles])
 
         tiles = tiles.stack()
 
         # Figure out which tiles we are going to keep
-        if not read_chunk:
-            # Keep nothing
-            where = tf.where(tf.repeat(False, len))
-        elif mask_chunk_supplied:
-            # Use the supplied mask
-            where = tf.where(
-                tf.reshape(
-                    mask_chunk[:usable_mask_height, :usable_mask_width, 0],
-                    [
-                        len,
-                    ],
-                )
+        where = tf.where(
+            tf.reshape(
+                mask_chunk[:usable_mask_height, :usable_mask_width, 0],
+                [
+                    len,
+                ],
             )
-        else:
-            # Keep everything
-            where = tf.where(tf.repeat(True, len))
+        )
         # Change shape from (tf.size(where), 1) to (tf.size(where),)
         where = tf.reshape(where, [tf.size(where)])
 

@@ -34,7 +34,8 @@ class Header:
     mask_filenames : str
         A list of masks for the slides.  Each slide's mask will be used to select which tiles of the
         slide to process.  If the mask does not have one pixel per tile then it will be upsampled or
-        downsampled as necessary.
+        downsampled as necessary.  An empty string indicates that no mask file is being supplied and
+        that all tiles should be retained.
 
     Notes
     -----
@@ -42,9 +43,7 @@ class Header:
 
     """
 
-    def __init__(
-        self, slides, filenames, cases, magnifications, read_modes, mask_filenames
-    ):
+    def __init__(self, slides, filenames, cases, magnifications, read_modes, mask_filenames):
         self.dictionary = {
             "slide": slides,
             "filename": filenames,
