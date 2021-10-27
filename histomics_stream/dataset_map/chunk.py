@@ -1,9 +1,9 @@
 """Whole-slide image file reader for TensorFlow.
 
-The histomics_stream.dsm.chunk module supports transformations that operate on a tensorflow.data.Dataset
-that has one element per chunk.  (A chunk is the unit that is read from disk.  It is smaller than the
-whole slide image but larger than a tile to minimize reads for performance.)  This module defines
-objects that can be supplied to the tf.data.Dataset.map() method.
+The histomics_stream.dataset_map.chunk module supports transformations that operate on a
+tensorflow.data.Dataset that has one element per chunk.  (A chunk is the unit that is read from disk.
+It is smaller than the whole slide image but larger than a tile to minimize reads for performance.)
+This module defines objects that can be supplied to the tf.data.Dataset.map() method.
 
 """
 
@@ -21,11 +21,11 @@ import tifffile
 class ReadAndSplitChunk:
     """A class that reads a chunk from disk and splits it into tiles.
 
-    An instance of class histomics_stream.dsm.chunk.ReadAndSplitChunk can be supplied as an argument to
-    tensorflow.dataset.map.  histomics_stream.dsm.chunk.ReadAndSplitChunk reads each chunk from disk
-    (for chunks containing at least one masked tile), splits the chunk into tiles, and discards unmasked
-    tiles.  The result is a dataset where each element is set of tiles batched by chunk.  Calling
-    .unbatch() will transform this into an unbatched dataset of tile elements.
+    An instance of class histomics_stream.dataset_map.chunk.ReadAndSplitChunk can be supplied as an
+    argument to tensorflow.dataset.map.  histomics_stream.dataset_map.chunk.ReadAndSplitChunk reads each
+    chunk from disk (for chunks containing at least one masked tile), splits the chunk into tiles, and
+    discards unmasked tiles.  The result is a dataset where each element is set of tiles batched by
+    chunk.  Calling .unbatch() will transform this into an unbatched dataset of tile elements.
 
     """
 
@@ -111,8 +111,8 @@ class ReadAndSplitChunk:
             "tile": tiles,
         }
 
-        # Keep only the tiles that we want.  If we have read in the chunk and don't have mask_chunk supplied
-        # then there is nothing to do because we are keeping everything.
+        # Keep only the tiles that we want.  If we have read in the chunk and don't have mask_chunk
+        # supplied then there is nothing to do because we are keeping everything.
 
         response = {}
         for key in all_tiles.keys():
@@ -121,7 +121,9 @@ class ReadAndSplitChunk:
         return response
 
     def _py_read_chunk(self, filenameIn, level, x, y, w, h):
-        """This method is the internal py_function (i.e. not @tf.function) that invokes the openslide package for reading."""
+        """This method is the internal py_function (i.e. not @tf.function) that invokes the openslide
+        package for reading.
+        """
 
         filename = filenameIn.numpy().decode("utf-8")
         if re.compile(r"\.svs$").search(filename):

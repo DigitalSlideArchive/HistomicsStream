@@ -18,7 +18,7 @@ import random
 import re
 import tensorflow as tf
 import time
-from . import ds, dsm, codecs
+from . import dataset, dataset_map, codecs
 
 
 def _merge_dist_tensor(strategy, distributed, axis=0):
@@ -85,7 +85,7 @@ def read_example(devices, strategy):
     # Taken together, the Nth entry from each list comprise a dictionary that is the Nth element in the
     # dataset.
 
-    all_wsi_images = [
+    all_slide_images = [
         "jpeg75.stack/0.0.jpeg",
         "jpeg75.stack/0.10240.jpeg",
         "jpeg75.stack/0.12288.jpeg",
@@ -2302,42 +2302,42 @@ def read_example(devices, strategy):
         "jpeg75.stack/98304.8192.jpeg",
     ]
 
-    # all_wsi_images = ["RGBA/default1024.zarr"]
-    # all_wsi_images = ["RGBA/default2048.zarr"]
-    # all_wsi_images = ["RGBA/default256.zarr"]
-    # all_wsi_images = ["RGBA/default4096.zarr"]
-    # all_wsi_images = ["RGBA/zstd_compressor1024.zarr"]
-    # all_wsi_images = ["RGBA/zstd_compressor2048.zarr"]
+    # all_slide_images = ["RGBA/default1024.zarr"]
+    # all_slide_images = ["RGBA/default2048.zarr"]
+    # all_slide_images = ["RGBA/default256.zarr"]
+    # all_slide_images = ["RGBA/default4096.zarr"]
+    # all_slide_images = ["RGBA/zstd_compressor1024.zarr"]
+    # all_slide_images = ["RGBA/zstd_compressor2048.zarr"]
 
-    all_wsi_images = ["TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs"]
-    # all_wsi_images = ["default1024.zarr"]
-    # all_wsi_images = ["default2048.zarr"]
-    # all_wsi_images = ["default256.zarr"]
-    # all_wsi_images = ["default4096.zarr"]
-    # all_wsi_images = ["jpeg2k_compressor2048.zarr"]
-    # all_wsi_images = ["jpeg2klevel80_compressor2048.zarr"]
-    # all_wsi_images = ["kwjpeg100_compressor2048.zarr"]
-    # all_wsi_images = ["kwjpeg30_compressor2048.zarr"]
-    # all_wsi_images = ["kwjpeg30_compressor256.zarr"]
-    # all_wsi_images = ["kwjpeg75_compressor2048.zarr"]
-    # all_wsi_images = ["kwjpeg95_compressor2048.zarr"]
-    # all_wsi_images = ["kwjpegVarious_compressor256.zarr"]
-    # all_wsi_images = ["zstd_compressor1024.zarr"]
-    # all_wsi_images = ["zstd_compressor2048.zarr"]
+    all_slide_images = ["TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs"]
+    # all_slide_images = ["default1024.zarr"]
+    # all_slide_images = ["default2048.zarr"]
+    # all_slide_images = ["default256.zarr"]
+    # all_slide_images = ["default4096.zarr"]
+    # all_slide_images = ["jpeg2k_compressor2048.zarr"]
+    # all_slide_images = ["jpeg2klevel80_compressor2048.zarr"]
+    # all_slide_images = ["kwjpeg100_compressor2048.zarr"]
+    # all_slide_images = ["kwjpeg30_compressor2048.zarr"]
+    # all_slide_images = ["kwjpeg30_compressor256.zarr"]
+    # all_slide_images = ["kwjpeg75_compressor2048.zarr"]
+    # all_slide_images = ["kwjpeg95_compressor2048.zarr"]
+    # all_slide_images = ["kwjpegVarious_compressor256.zarr"]
+    # all_slide_images = ["zstd_compressor1024.zarr"]
+    # all_slide_images = ["zstd_compressor2048.zarr"]
 
-    print(f"Image source = {all_wsi_images}")
+    print(f"Image source = {all_slide_images}")
 
     # We will use a mask to determine which tiles of the slide to process.  In this example we will
-    # build the mask name from the WSI file name, by inserting "-mask" and changing the file type to
+    # build the mask name from the slide file name, by inserting "-mask" and changing the file type to
     # "png", but generally any file name and any file type that we can read as an image will do.
 
-    all_masks = [re.sub(r"^(.*)\.([^\.]*)$", r"\1-mask.png", wsi) for wsi in all_wsi_images]
+    all_masks = [re.sub(r"^(.*)\.([^\.]*)$", r"\1-mask.png", slide) for slide in all_slide_images]
     print(f"all_masks = {all_masks}")
 
-    header = dict(
-        ds.init.Header(
+    slices = dict(
+        dataset.construction.Slices(
             slides="TCGA-BH-A0BZ-01Z-00-DX1",
-            filenames=all_wsi_images,
+            filenames=all_slide_images,
             cases="TCGA-BH-A0BZ",
             magnifications=20.0,
             read_modes="tiled",
@@ -2345,27 +2345,27 @@ def read_example(devices, strategy):
         )
     )
 
-    tiles = tf.data.Dataset.from_tensor_slices(header)
+    tiles = tf.data.Dataset.from_tensor_slices(slices)
 
     # For the desired magnification, find the best level stored in the image file, and its associated
     # factor, width, and height.
-    compute_read_parameters = dsm.wsi.ComputeReadParameters()
+    compute_read_parameters = dataset_map.slide.ComputeReadParameters()
     tiles = tiles.map(compute_read_parameters)
 
     # Specify size, overlap, etc. information about the tiles that we want to analyze.
-    add_tile_description = dsm.wsi.AddTileDescription()
+    add_tile_description = dataset_map.slide.AddTileDescription()
     tiles = tiles.map(add_tile_description)
 
     # If there are any then read in the masks, one per slide, that specify tile selction.  If they are
     # not already then downsample (or upsample) the masks to be one pixel per tile.
-    compute_resampled_mask = dsm.wsi.ComputeResampledMask()
+    compute_resampled_mask = dataset_map.slide.ComputeResampledMask()
     tiles = tiles.map(compute_resampled_mask, **dataset_map_options)
 
     # Split each element (e.g. each slide) into a batch of multiple rows, one per chunk to be read.
     # Note that the width `cw` or height `ch` of a row (chunk) may decreased from the requested value if
     # a chunk is near the edge of an image.  Note that it is important to call `.unbatch()` when it is
     # desired that the chunks be not batched by slide.
-    compute_chunk_positions = dsm.wsi.ComputeChunkPositions()
+    compute_chunk_positions = dataset_map.slide.ComputeChunkPositions()
     tiles = (
         tiles.map(compute_chunk_positions, **dataset_map_options)
         .prefetch(tf.data.experimental.AUTOTUNE)
@@ -2373,16 +2373,16 @@ def read_example(devices, strategy):
     )
 
     # For debugging purposes, do a step that does nothing
-    tfd_no_op = dsm.wsi.NoOp()
+    tfd_no_op = dataset_map.slide.NoOp()
     tiles = tiles.map(tfd_no_op)
 
     # For debugging purposes, do a step that does nothing but print side effects.
-    # tfd_print = dsm.wsi.Print(tf.constant(314, dtype=tf.int32))
+    # tfd_print = dataset_map.slide.Print(tf.constant(314, dtype=tf.int32))
     # tiles = tiles.map(tfd_print)
 
     # Read and split the chunks into the tile size we want.  Note that it is important to call
     # `.unbatch()` when it is desired that the tiles be not batched by chunk.
-    read_and_split_chunk = dsm.chunk.ReadAndSplitChunk()
+    read_and_split_chunk = dataset_map.chunk.ReadAndSplitChunk()
     tiles = (
         tiles.map(read_and_split_chunk, **dataset_map_options)
         .prefetch(tf.data.experimental.AUTOTUNE)

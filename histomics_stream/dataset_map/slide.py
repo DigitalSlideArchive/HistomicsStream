@@ -1,8 +1,8 @@
 """Whole-slide image file reader for TensorFlow.
 
-The histomics_stream.dsm.wsi module supports transformations that operate on a tensorflow.data.Dataset
-that has one element per whole-slide image.  This module defines objects that can be supplied to the
-tf.data.Dataset.map() method.
+The histomics_stream.dataset_map.slide module supports transformations that operate on a
+tensorflow.data.Dataset that has one element per whole-slide image.  This module defines
+objects that can be supplied to the tf.data.Dataset.map() method.
 
 """
 
@@ -16,152 +16,53 @@ import tensorflow as tf
 import zarr
 
 
-class Header:
-    """A class used to initialize a tensorflow.data.Dataset.
-
-    An instance of class histomics_stream.dsm.wsi.Header can be cast to dict and supplied to
-    tensorflow.data.Dataset.from_tensor_slices to create an instance of a tensorflow dataset object.
-    The primary functionality of this class over an ordinary dictionary is that (1) it requires all the
-    named keys, (2) it ensures that each value is a list or tuple, and (3) it expands via repetition any
-    length-one lists to be the same length as the number of supplied filenames.
-
-    Each parameter includes one value per slide to be analyzed.  However, if a parameter is a list (or
-    tuple) of length 1 then that one value is used for every slide.
-
-    Parameters
-    ----------
-    slides : str
-        A list of names of the slides to be processed
-    filenames : str
-        A list of file names that contain the slides data
-    cases : str
-        A list of names of cases, where multiple slides could belong to each case
-    magnifications : str
-        A list of the desired manification levels that the slides should be analyzed at
-    read_modes : str
-        A list of keywords.  Currently only "tiled" is supported.
-    mask_filenames : str
-        A list of masks for the slides.  Each slide's mask will be used to select which tiles of the
-        slide to process.  If the mask does not have one pixel per tile then it will be upsampled or
-        downsampled as necessary.  An empty string indicates that no mask file is being supplied and
-        that all tiles should be retained.
-
-    Notes
-    -----
-    Note that the __init__ method cannot be decorated with @tf.function for reasons that are not clear,
-    but might (or might not!) be because an instance of a class (returned by the __init__ method) is not
-    a tensorflow object.
-
-    Because it has the keys and __getitem__ methods, this class can be cast to a Python dict.
-
-    """
-
-    def __init__(self, slides, filenames, cases, magnifications, read_modes, mask_filenames):
+class SetSlideParameters:
+    def __init__(
+        self,
+        slide_filename,
+        slide_name,
+        slide_group,  # e.g., associated patient
+        desired_magnification,  # e.g., 20 (which is ~ 0.5 um / pixel)
+        magnification_tolerance,  # e.g., 0.02 (accept as much as 2% lower magnification)
+    ):
         self.dictionary = {
-            "slide": slides,
-            "filename": filenames,
-            "case": cases,
-            "magnification": magnifications,
-            "read_mode": read_modes,
-            "mask_filename": mask_filenames,
+            "slide_filename": slide_filename,
+            "slide_name": slide_name,
+            "slide_group": slide_group,
+            "desired_magnification": desired_magnification,
+            "magnification_tolerance": magnification_tolerance,
         }
         # Convert an entry to a list if it is not already a list or tuple
         for key in self.dictionary.keys():
             if not isinstance(self.dictionary[key], (list, tuple)):
-                self.dictionary[key] = [
-                    self.dictionary[key],
-                ]
-        # Make all singleton values have the same length as `filenames`
-        if len(filenames) != 1:
+                self.dictionary[key] = [self.dictionary[key]]
+        # Make all singleton values have the same length as `slide_filename`
+        if len(slide_filename) != 1:
             for key in self.dictionary.keys():
-                if key != "filename" and len(self.dictionary[key]) == 1:
-                    self.dictionary[key] = self.dictionary[key] * len(filenames)
+                if key != "slide_filename" and len(self.dictionary[key]) == 1:
+                    self.dictionary[key] = self.dictionary[key] * len(slide_filename)
 
-    def keys(self):
-        """The method that returns the keys of the key-value pairs stored by
-        histomics_stream.dsm.wsi.Header.
-        """
-        return self.dictionary.keys()
-
-    def __getitem__(self, key):
-        """The method that returns the value corresponding to a key by histomics_stream.dsm.wsi.Header."""
-        return self.dictionary[key]
-
-
-class NoOp:
-    """A class that does nothing that can be supplied to tensorflow.dataset.map
-
-    An instance of class histomics_stream.dsm.wsi.NoOp can be supplied as an argument to
-    tensorflow.dataset.map.  It is a "no operation" callable that accepts a single argument.
-
-    This implementation is generic enough that the class can also be used at tensorflow workflow stages
-    other than histomics_stream.dsm.wsi.
-
-    """
-
-    @tf.function
-    def __call__(self, elem):
-        """This method is called by tensorflow to do the work of this class."""
-        return elem
-
-
-class Print:
-    """A class that does nothing but print that can be supplied to tensorflow.dataset.map
-
-    An instance of class histomics_stream.dsm.wsi.Print can be supplied as an argument to
-    tensorflow.dataset.map.  Like histomics_stream.dsm.wsi.NoOp, it is a "no operation" callable that
-    accepts a single argument, though it has side effects in that it prints.  It demonstrates that
-    tensorflow graph functionality is working by printing at tensorflow-graph trace time and at
-    tensorflow-graph run time.  It also demonstrates that tensorflow graph functionality is properly
-    handling the information flow from __init__ to __call__.
-
-    This implementation is generic enough that the class can also be used at tensorflow workflow stages
-    other than histomics_stream.dsm.wsi.
-
-    Notes
-    -----
-    Note that the __init__ method cannot be decorated with @tf.function for reasons that are not clear,
-    but might (or might not!) be because an instance of a class (returned by the __init__ method) is not
-    a tensorflow object.
-
-    """
-
-    def __init__(self, member):
-        self.member = member
-        tf.print(
-            "Running histomics_stream.dsm.wsi.Print.__init__, with member = ",
-            self.member,
-        )
-        print("Tracing histomics_stream.dsm.wsi.Print.__init__")
-
-    @tf.function
-    def __call__(self, elem):
-        """This method is called by tensorflow to do the work of this class."""
-        tf.print(
-            "Running histomics_stream.dsm.wsi.Print.__call__, with member = ",
-            self.member,
-        )
-        print("Tracing histomics_stream.dsm.wsi.Print.__call__")
-        return elem
 
 
 class ComputeReadParameters:
     """A class that computes read parameters for slides in a tensorflow dataset.
 
-    An instance of class histomics_stream.dsm.wsi.ComputeReadParameters can be supplied as an argument
-    to tensorflow.dataset.map.  histomics_stream.dsm.wsi.ComputeReadParameters computes level, factor,
+    An instance of class histomics_stream.dataset_map.slide.ComputeReadParameters can be
+    supplied as an argument to tensorflow.dataset.map.
+    histomics_stream.dataset_map.slide.ComputeReadParameters computes level, factor,
     width, and height from the inputs filename, magnification, and tolerance.
-    histomics_stream.dsm.wsi.ComputeReadParameters adds new key-value pairs to the tensorflow dictionary
-    for the newly computed values.  Ideally the implementation would be all tf.function (i.e., a
-    tensorflow graph function); however, much of the code is via a tensorflow py_function because our
-    current implementation for discerning the size of an image without reading in the pixel values uses
+    histomics_stream.dataset_map.slide.ComputeReadParameters adds new key-value pairs to
+    the tensorflow dictionary for the newly computed values.  Ideally the implementation
+    would be all tf.function (i.e., a tensorflow graph function); however, much of the
+    code is via a tensorflow py_function because our current implementation for
+    discerning the size of an image without reading in the pixel values uses
     non-tensorflow packages, such as openslide.
 
     Notes
     -----
-    Note that the __init__ method cannot be decorated with @tf.function for reasons that are not clear,
-    but might (or might not!) be because an instance of a class (returned by the __init__ method) is not
-    a tensorflow object.
+    Note that the __init__ method cannot be decorated with @tf.function for reasons that
+    are not clear, but might (or might not!) be because an instance of a class (returned
+    by the __init__ method) is not a tensorflow object.
 
     """
 
@@ -187,8 +88,10 @@ class ComputeReadParameters:
         return response
 
     def _py_compute_read_parameters(self, filename_in, magnification_in, tolerance_in):
-        """This method is the internal py_function (i.e. not @tf.function) that does the actual work of
-        this class.
+
+        """This method is the internal py_function (i.e. not @tf.function) that does the
+        actual work of this class.
+
         """
         filename = filename_in.numpy().decode("utf-8")
         magnification = magnification_in.numpy()
@@ -205,9 +108,12 @@ class ComputeReadParameters:
             estimated = np.array(objective / os_obj.level_downsamples)
 
             # Find best level to use and its factor
-            level, factor = self._get_level_and_factor(magnification, estimated, tolerance)
+            level, factor = self._get_level_and_factor(
+                magnification, estimated, tolerance
+            )
 
-            # get slide width, height at desired magnification. (Note width before height)
+            # get slide width, height at desired magnification. (Note width before
+            # height)
             width, height = os_obj.level_dimensions[level]
 
         elif re.compile(r"\.zarr$").search(filename):
@@ -222,13 +128,17 @@ class ComputeReadParameters:
             estimated = np.array(objective / source_group.attrs["level_downsamples"])
 
             # Find best level to use and its factor
-            level, factor = self._get_level_and_factor(magnification, estimated, tolerance)
+            level, factor = self._get_level_and_factor(
+                magnification, estimated, tolerance
+            )
 
-            # get slide width, height at desired magnification. (Note height before width)
+            # get slide width, height at desired magnification. (Note height before
+            # width)
             height, width = source_group[format(level)].shape[0:2]
 
         else:
-            # We don't know magnifications so assume reasonable values for level and factor.
+            # We don't know magnifications so assume reasonable values for level and
+            # factor.
             level = 0
             factor = 1.0
             if True:
@@ -265,12 +175,13 @@ class AddTileDescription:
     """A class for supplying tile size and other information that can be supplied to
     tensorflow.dataset.map.
 
-    An instance of class histomics_stream.dsm.wsi.AddTileDescription can be supplied as an argument to
-    tensorflow.dataset.map.  histomics_stream.dsm.wsi.AddTileDescription adds new key-value pairs to the
-    tensorflow dictionary to set the desired tile width, height, width overlap, and height overlap for
-    each element.  chunk_width_factor and chunk_height_factor indicate how many tiles are read at a
-    time.  The primary functionality of this class over an ordinary dictionary is that it sets all the
-    required keys and no others.
+    An instance of class histomics_stream.dataset_map.slide.AddTileDescription can be
+    supplied as an argument to tensorflow.dataset.map.
+    histomics_stream.dataset_map.slide.AddTileDescription adds new key-value pairs to
+    the tensorflow dictionary to set the desired tile width, height, width overlap, and
+    height overlap for each element.  chunk_width_factor and chunk_height_factor
+    indicate how many tiles are read at a time.  The primary functionality of this class
+    over an ordinary dictionary is that it sets all the required keys and no others.
 
     Parameters
     ----------
@@ -283,15 +194,17 @@ class AddTileDescription:
     overlap_height : tf.constant(, dtype=tf.int32)
         The amount of overlap of height between adjacent tiles.
     chunk_width_factor : tf.constant(, dtype=tf.int32)
-        The width of a chunk read from disk at one time as measured in number of (possibly) tiles.
+        The width of a chunk read from disk at one time as measured in number of
+        (possibly) tiles.
     chunk_height_factor : tf.constant(, dtype=tf.int32)
-        The height of a chunk read from disk at one time as measured in number of (possibly) tiles.
+        The height of a chunk read from disk at one time as measured in number of
+        (possibly) tiles.
 
     Notes
     -----
-    Note that the __init__ method cannot be decorated with @tf.function for reasons that are not clear,
-    but might (or might not!) be because an instance of a class (returned by the __init__ method) is not
-    a tensorflow object.
+    Note that the __init__ method cannot be decorated with @tf.function for reasons that
+    are not clear, but might (or might not!) be because an instance of a class (returned
+    by the __init__ method) is not a tensorflow object.
 
     """
 
@@ -323,13 +236,15 @@ class AddTileDescription:
 class ComputeResampledMask:
     """A class that uses mask information to select tiles.
 
-    An instance of class histomics_stream.dsm.wsi.ComputeResampledMask can be supplied as an argument to
-    tensorflow.dataset.map.  histomics_stream.dsm.wsi.ComputeResampledMask reads in a supplied mask and
-    upsamples or downsamples it if necessary so that there is exactly one pixel in the mask for each
-    tile in the input image.  Note that we are assuming that this will take care of any aspects related
-    to the overlapping of tiles.  Subsequent to that, we will not be looking at the mask pixels for
-    adjacent tiles even though they may overlap with the tile being considered.  Note further that we
-    are assuming that the mask will be downsampled (or upsampled) to have one whole pixel per tile.
+    An instance of class histomics_stream.dataset_map.slide.ComputeResampledMask can be
+    supplied as an argument to tensorflow.dataset.map.
+    histomics_stream.dataset_map.slide.ComputeResampledMask reads in a supplied mask and
+    upsamples or downsamples it if necessary so that there is exactly one pixel in the
+    mask for each tile in the input image.  Note that we are assuming that this will
+    take care of any aspects related to the overlapping of tiles.  Subsequent to that,
+    we will not be looking at the mask pixels for adjacent tiles even though they may
+    overlap with the tile being considered.  Note further that we are assuming that the
+    mask will be downsampled (or upsampled) to have one whole pixel per tile.
 
     """
 
@@ -337,7 +252,7 @@ class ComputeResampledMask:
     def __call__(self, elem):
         """This method is called by tensorflow to do the work of this class."""
 
-        mask_wsi = tf.py_function(
+        mask_slide = tf.py_function(
             func=self._py_compute_resampled_mask,
             inp=[
                 elem["mask_filename"],
@@ -352,7 +267,7 @@ class ComputeResampledMask:
             ],
             Tout=tf.uint8,
         )
-        return {**elem, "mask_wsi": mask_wsi}
+        return {**elem, "mask_slide": mask_slide}
 
     def _py_compute_resampled_mask(
         self,
@@ -366,8 +281,9 @@ class ComputeResampledMask:
         ow_in,
         oh_in,
     ):
-        """This method is the internal py_function (i.e. not @tf.function) that does much of the actual
-        work of this class.
+        """This method is the internal py_function (i.e. not @tf.function) that does
+        much of the actual work of this class.
+
         """
 
         mask_filename = mask_filename_in.numpy().decode("utf-8")
@@ -403,22 +319,30 @@ class ComputeResampledMask:
             # Add batch and channels dimensions
             mask = mask[tf.newaxis, ..., tf.newaxis]
             if (
-                abs(math.log((resampled_width / mask.shape[2]) / (resampled_height / mask.shape[1])))
+                abs(
+                    math.log(
+                        (resampled_width / mask.shape[2])
+                        / (resampled_height / mask.shape[1])
+                    )
+                )
                 > 0.20
             ):
-                raise ValueError("The mask aspect ratio does not match the image aspect ratio.")
+                raise ValueError(
+                    "The mask aspect ratio does not match the image aspect ratio."
+                )
 
         # Perform the resampling
         resampled = tf.image.resize(mask, resampled_shape)[0, ...]
 
-        # * At some point the mask gets broken up into chunks that are chunk_height_factor by
-        # chunk_width_factor; to make tensorflow happy, we make sure that the dimensions of the mask are
-        # multiples of those values.
-        # * Also, we reshape so that the mask has shape (padded_height, padded_width, channels) where
-        # channels = 1.
-        # * Also, we cast the array to type np.uint8.  (Note that we use a formula with floor() rather
-        # than a formula with ceil() so that we get the same answer with float or integer division for
-        # the argument.)
+        # * At some point the mask gets broken up into chunks that are
+        #   chunk_height_factor by chunk_width_factor; to make tensorflow happy, we make
+        #   sure that the dimensions of the mask are multiples of those values.
+        # * Also, we reshape so that the mask has shape (padded_height, padded_width,
+        #   channels) where channels = 1.
+        # * Also, we cast the array to type np.uint8.  (Note that we use a formula with
+        #   floor() rather than a formula with ceil() so that we get the same answer
+        #   with float or integer division for the argument.)
+
         padded_resampled = np.zeros(
             (
                 int((tf.math.floor((resampled_shape[0] - 1) / chf) + 1) * chf),
@@ -444,11 +368,13 @@ class ComputeResampledMask:
 class ComputeChunkPositions:
     """A class for computing the locations of chunks to be read from a whole slide.
 
-    An instance of class histomics_stream.dsm.wsi.ComputeChunkPositions can be supplied as an argument
-    to tensorflow.dataset.map.  histomics_stream.dsm.wsi.ComputeChunkPositions figures out what the read
-    chunks will be based upon the tile parameters (size, overlap).  It divvys up the mask into pieces
-    corresponding to the read chunks.  Note that it is important to subsequently call .unbatch() when it
-    is desired that the chunks be not batched by slide.
+    An instance of class histomics_stream.dataset_map.slide.ComputeChunkPositions can be
+    supplied as an argument to tensorflow.dataset.map.
+    histomics_stream.dataset_map.slide.ComputeChunkPositions figures out what the read
+    chunks will be based upon the tile parameters (size, overlap).  It divvys up the
+    mask into pieces corresponding to the read chunks.  Note that it is important to
+    subsequently call .unbatch() when it is desired that the chunks be not batched by
+    slide.
 
     """
 
@@ -461,8 +387,9 @@ class ComputeChunkPositions:
         chunk_width = elem["cwf"] * (elem["tw"] - elem["ow"]) + elem["ow"]
         chunk_height = elem["chf"] * (elem["th"] - elem["oh"]) + elem["oh"]
 
-        # The left side of a tile cannot be as large as left_bound.  Also, the left side of a chunk
-        # cannot be as large as left_bound because chunks contain a whole number of tiles.
+        # The left side of a tile cannot be as large as left_bound.  Also, the left side
+        # of a chunk cannot be as large as left_bound because chunks contain a whole
+        # number of tiles.
         left_bound = tf.maximum(zero, elem["width"] - elem["tw"] + one)
         chunk_left = tf.range(zero, left_bound, chunk_width - elem["ow"])
         chunk_right = tf.clip_by_value(chunk_left + chunk_width, zero, elem["width"])
@@ -477,15 +404,15 @@ class ComputeChunkPositions:
         ch = tf.repeat(chunk_bottom - chunk_top, tf.size(chunk_left))
         chunk_len = tf.size(cx)
 
-        # Compute a mask for each chunk.  The size of a mask for a chunk will be chunk_width_factor by
-        # chunk_height_factor, even along the right or bottom border where it will be padded if
-        # necessary.
+        # Compute a mask for each chunk.  The size of a mask for a chunk will be
+        # chunk_width_factor by chunk_height_factor, even along the right or bottom
+        # border where it will be padded if necessary.
 
         mask_chunks = tf.TensorArray(dtype=tf.uint8, size=chunk_len)
-        mask_width = tf.shape(elem["mask_wsi"])[1]
+        mask_width = tf.shape(elem["mask_slide"])[1]
         mask_left = tf.cast(chunk_left / (elem["tw"] - elem["ow"]), dtype=tf.int32)
         mask_right = tf.clip_by_value(mask_left + elem["cwf"], zero, mask_width)
-        mask_height = tf.shape(elem["mask_wsi"])[0]
+        mask_height = tf.shape(elem["mask_slide"])[0]
         mask_top = tf.cast(chunk_top / (elem["th"] - elem["oh"]), dtype=tf.int32)
         mask_bottom = tf.clip_by_value(mask_top + elem["chf"], zero, mask_height)
         mask_x = tf.tile(mask_left, tf.stack([tf.size(mask_top)]))
@@ -494,13 +421,13 @@ class ComputeChunkPositions:
         mask_h = tf.repeat(mask_bottom - mask_top, tf.size(mask_left))
         mask_len = tf.size(mask_x)
 
-        # mask_chunks = [elem["mask_wsi"][y:(y+h), x:(x+w)]
+        # mask_chunks = [elem["mask_slide"][y:(y+h), x:(x+w)]
         #                for x, y, w, h in zip(mask_x, mask_w, mask_y, mask_h)]
         for i in tf.range(mask_len):
             mask_chunks = mask_chunks.write(
                 i,
                 tf.image.crop_to_bounding_box(
-                    elem["mask_wsi"],
+                    elem["mask_slide"],
                     tf.gather(mask_y, i),
                     tf.gather(mask_x, i),
                     tf.gather(mask_h, i),
@@ -511,8 +438,8 @@ class ComputeChunkPositions:
         mask_chunks = mask_chunks.stack()
         response = {}
         for key in elem.keys():
-            if key != "mask_wsi":
-                # Exclude mask_wsi because it is large and we now have mask_chunk.
+            if key != "mask_slide":
+                # Exclude mask_slide because it is large and we now have mask_chunk.
                 response[key] = tf.repeat(elem[key], mask_len)
         response = {
             **response,
