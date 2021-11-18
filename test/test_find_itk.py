@@ -14,17 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Purpose: Test to check that ITK can be found
-
 
 def test_itk_can_be_found():
+    """Purpose: Test to check that ITK can be found"""
+
     # Import succeeds
     import itk
-
-
-# Purpose: Test to check that histomics_stream can be found
-
-
-def test_histomics_stream_can_be_found():
-    # Import succeeds
-    import histomics_stream
