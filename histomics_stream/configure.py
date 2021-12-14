@@ -69,6 +69,50 @@ class FindResolutionForSlide:
 
         # Do the work.
         if re.compile(r"\.svs$").search(filename):
+            import large_image
+
+            # read whole-slide image file and create large_image object
+            ts = large_image.open(filename)
+
+            # measure objective of level 0
+            objective = np.float32(ts.getNativeMagnification()["magnification"])
+
+            if False:
+                # Use the level that large_image is willing to interpolate for us.
+                preferred_levels = [
+                    ts.getLevelForMagnification(
+                        self.desired_magnification, rounding=False
+                    )
+                ]
+            else:
+                # Use one of the levels that is stored in the image file.
+                preferred_levels = list(
+                    set(ts.getPreferredLevel(level) for level in range(ts.levels))
+                )
+                preferred_levels.sort(reverse=True)
+
+            estimated = np.array(
+                [
+                    ts.getMagnificationForLevel(level)["magnification"]
+                    for level in preferred_levels
+                ]
+            )
+
+            # Find best native level to use and its factor
+            level, factor = self._get_level_and_factor(
+                self.desired_magnification, estimated, self.magnification_tolerance
+            )
+
+            number_pixel_columns_for_slide = int(
+                ts.sizeX * estimated[level] // objective
+            )
+            number_pixel_rows_for_slide = int(ts.sizeY * estimated[level] // objective)
+
+            # Rather than as the index into preferred_levels, change
+            # level to be the value that large_image uses
+            level = preferred_levels[level]
+
+        elif re.compile(r"\.svs$").search(filename):
             import openslide as os
 
             # read whole-slide image file and create openslide object
@@ -80,7 +124,7 @@ class FindResolutionForSlide:
             # calculate magnifications of levels
             estimated = np.array(objective / os_obj.level_downsamples)
 
-            # Find best level to use and its factor
+            # Find best native level to use and its factor
             level, factor = self._get_level_and_factor(
                 self.desired_magnification, estimated, self.magnification_tolerance
             )
@@ -107,7 +151,7 @@ class FindResolutionForSlide:
             # calculate magnifications of levels
             estimated = np.array(objective / source_group.attrs["level_downsamples"])
 
-            # Find best level to use and its factor
+            # Find best native level to use and its factor
             level, factor = self._get_level_and_factor(
                 self.desired_magnification, estimated, self.magnification_tolerance
             )
