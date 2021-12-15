@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="histomics_stream",
-    version="2.0.0",
+    version="2.1.0",
     author="Lee Newberg",
     author_email="lee.newberg@kitware.com",
     description="A TensorFlow 2 package for reading whole slide images",
@@ -24,6 +24,7 @@ setuptools.setup(
         "pillow",
         "imagecodecs",
         "openslide-python",
+        "large-image[all]",
         "zarr",
         "napari_lazy_openslide",
         "tifffile",

@@ -302,6 +302,21 @@ class CreateTensorFlowDataset:
         level = level.numpy()
 
         if re.compile(r"\.svs$").search(filename):
+            import large_image
+
+            ts = large_image.open(filename)
+            chunk = ts.getRegion(
+                scale=dict(level=level),
+                format=large_image.constants.TILE_FORMAT_NUMPY,
+                region=dict(
+                    left=chunk_left,
+                    top=chunk_top,
+                    width=chunk_right - chunk_left,
+                    height=chunk_bottom - chunk_top,
+                    units="mag_pixels",
+                ),
+            )[0]
+        elif re.compile(r"\.svs$").search(filename):
             import openslide as os
 
             os_obj = os.OpenSlide(filename)

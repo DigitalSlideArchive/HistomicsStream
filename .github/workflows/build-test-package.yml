@@ -9,8 +9,12 @@ jobs:
       max-parallel: 2
       matrix:
         python-version: [3.6, 3.7, 3.8, 3.9]
+
         include:
-          - itk-python-git-tag: "v5.2.1"
+          - flake8-python-git-tag: "<4.0.0"
+          - itk-python-git-tag: "==v5.2.1"
+          - pytest-python-git-tag: "<7.0.0"
+          - tensorflow-python-git-tag: "<2.7.0"
 
     steps:
       - uses: actions/checkout@v2
@@ -28,15 +32,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install basic dependencies
+      - name: Install Python dependencies
         run: |
           sudo apt install python3-openslide
           python -m pip install --upgrade pip setuptools wheel
-          pip install flake8 pytest itk==${{ matrix.itk-python-git-tag }}
-
-      - name: Install tensorflow
-        run: |
-          pip install tensorflow
+          pip install 'flake8${{ matrix.flake8-python-git-tag }}' 'pytest${{ matrix.pytest-python-git-tag }}' 'itk${{ matrix.itk-python-git-tag }}' 'tensorflow${{ matrix.tensorflow-python-git-tag }}'
+          pip install 'large-image[all]' --find-links https://girder.github.io/large_image_wheels
 
       - name: Install histomics_stream
         run: |

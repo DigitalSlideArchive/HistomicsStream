@@ -1,10 +1,8 @@
 # histomics_stream
 
-Through version 1.0.6, this project was known as tensorflow_reader.
-
 ## Overview
 
-The goal of this project is to create a whole-slide image file reader for TensorFlow. This reader will allow users to extract pixel data from whole-slide image formats, and will support reading paradigms that are commonly used during training and inference.
+The goal of this project is to create a whole-slide image file reader for machine learning with TensorFlow. This reader will allow users to extract pixel data from whole-slide image formats, and will support reading paradigms that are commonly used during training and inference.
 
 ## Installation for Python
 
@@ -23,3 +21,7 @@ import histomics_stream as hs
 ```
 
 This has been tested with `tensorflow:2.6.2-gpu`.
+
+## History
+
+Through version 1.0.6, this project was known as tensorflow_reader.
