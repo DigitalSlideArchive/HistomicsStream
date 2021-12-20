@@ -114,9 +114,12 @@ class CreateTensorFlowDataset:
         # Change study_dataset so that each element is a tile.
         study_dataset = study_dataset.unbatch()
         # print("unbatch done")
-        # Make the tile pixels easier to find in each study_dataset element.
+
+        # Make the tile pixels easier to find in each study_dataset element.  Also, tack
+        # on additional elements to the tuple so that the form is (inputs, targets,
+        # sample_weights).
         study_dataset = study_dataset.map(
-            lambda elem: (elem.pop("tile_pixels"), elem), **self.dataset_map_options
+            lambda elem: ((elem.pop("tile_pixels"), elem), None, None), **self.dataset_map_options
         )
         # print("pop done")
 
