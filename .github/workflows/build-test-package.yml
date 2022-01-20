@@ -34,7 +34,8 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          sudo apt install python3-openslide
+          sudo apt update
+          sudo apt install openslide-tools python3-openslide
           python -m pip install --upgrade pip setuptools wheel
           pip install 'flake8${{ matrix.flake8-python-git-tag }}' 'pytest${{ matrix.pytest-python-git-tag }}' 'itk${{ matrix.itk-python-git-tag }}' 'tensorflow${{ matrix.tensorflow-python-git-tag }}'
           pip install 'large-image[all]' --find-links https://girder.github.io/large_image_wheels
