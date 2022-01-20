@@ -9,9 +9,11 @@ The goal of this project is to create a whole-slide image file reader for machin
 [![PyPI Version](https://img.shields.io/pypi/v/histomics_stream.svg)](https://pypi.python.org/pypi/histomics_stream)
 [![Open In CoLab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/DigitalSlideArchive/histomics_stream/blob/master/example/tensorflow_stream.ipynb?authuser=1)
 
-histomics_stream can be easily installed with Python wheels.  If you do not want the installation to be to your current Python environment, you should first create and activate a [Python virtual environment (venv)](https://docs.python.org/3/tutorial/venv.html) to work in.  Then, run the following from the command-line:
+histomics_stream can be easily installed with Python wheels.  If you do not want the installation to be to your current Python environment, you should first create and activate a [Python virtual environment (venv)](https://docs.python.org/3/tutorial/venv.html) to work in.  Then, run the following from the command line:
 
 ```shell-script
+pip uninstall -y large_image tensorflow histomics_stream
+pip install 'large_image[all]' --find-links https://girder.github.io/large_image_wheels
 pip install histomics_stream
 ```
 

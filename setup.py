@@ -24,7 +24,6 @@ setuptools.setup(
         "pillow",
         "imagecodecs",
         "openslide-python",
-        "large-image[all]",
         "zarr",
         "napari_lazy_openslide",
         "tifffile",
