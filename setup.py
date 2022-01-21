@@ -17,9 +17,7 @@ setuptools.setup(
         "histomics_stream": "histomics_stream",
     },
     install_requires=[
-        # tensorflow is not listed as a requirement because the user
-        # will likely want to specify the version for compatibility
-        # with the CUDA libraries, etc.
+        "tensorflow>=2.6.0,<2.7",
         "itk",
         "pillow",
         "imagecodecs",
