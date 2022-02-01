@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import re
 import tensorflow as tf
@@ -45,13 +46,6 @@ class CreateTensorFlowDataset:
         # cProfile.runctx("self._designate_chunks_for_tiles(study_description)", globals=globals(), locals=locals(), sort="cumulative")
         # print("_designate_chunks_for_tiles done")
 
-        self.number_pixel_rows_for_tile = tf.convert_to_tensor(
-            study_description["number_pixel_rows_for_tile"]
-        )
-        self.number_pixel_columns_for_tile = tf.convert_to_tensor(
-            study_description["number_pixel_columns_for_tile"]
-        )
-
         # Start converting our description into tensors.
         study_as_tensors = {
             study_key: [tf.convert_to_tensor(study_description[study_key])]
@@ -67,7 +61,7 @@ class CreateTensorFlowDataset:
                 **{
                     slide_key: [tf.convert_to_tensor(slide_description[slide_key])]
                     for slide_key in slide_description.keys()
-                    if slide_key != "chunks"
+                    if slide_key not in ["tiles", "chunks"]
                 },
             }
 
@@ -119,7 +113,8 @@ class CreateTensorFlowDataset:
         # on additional elements to the tuple so that the form is (inputs, targets,
         # sample_weights).
         study_dataset = study_dataset.map(
-            lambda elem: ((elem.pop("tile_pixels"), elem), None, None), **self.dataset_map_options
+            lambda elem: ((elem.pop("tile_pixels"), elem), None, None),
+            **self.dataset_map_options,
         )
         # print("pop done")
 
@@ -154,7 +149,6 @@ class CreateTensorFlowDataset:
             number_pixel_columns_for_chunk = slide["number_pixel_columns_for_chunk"]
 
             tiles_as_sorted_list = list(slide["tiles"].items())
-            del slide["tiles"]
             tiles_as_sorted_list.sort(
                 key=lambda x: x[1]["tile_left"]
             )  # second priority key
@@ -174,51 +168,23 @@ class CreateTensorFlowDataset:
                 }
                 number_of_chunks += 1
 
-                if True:
-                    # This implementations has a run time that is quadratic in the
-                    # number of tiles that a slide has.  It is too slow; we should make
-                    # it faster.
-                    tiles = chunk["tiles"] = {}
-                    subsequent_chunks = []
-                    for tile in tiles_as_sorted_list:
-                        if (
-                            tile[1]["tile_top"] + number_pixel_rows_for_tile
-                            <= chunk["chunk_bottom"]
-                            and tile[1]["tile_left"] + number_pixel_columns_for_tile
-                            <= chunk["chunk_right"]
-                            and tile[1]["tile_left"] >= chunk["chunk_left"]
-                            and tile[1]["tile_top"] >= chunk["chunk_top"]
-                        ):
-                            tiles[tile[0]] = tile[1]
-                        else:
-                            subsequent_chunks.append(tile)
-
-                else:
-                    # This implementations has a run time that is quadratic in the
-                    # number of tiles that a slide has.  It is even slower than the
-                    # above.
-                    tiles = chunk["tiles"] = {
-                        tile[0]: tile[1]
-                        for tile in tiles_as_sorted_list
-                        if tile[1]["tile_top"] + number_pixel_rows_for_tile
+                # This implementation has a run time that is quadratic
+                # in the number of tiles that a slide has.  It is too
+                # slow; we should make it faster.
+                tiles = chunk["tiles"] = {}
+                subsequent_chunks = []
+                for tile in tiles_as_sorted_list:
+                    if (
+                        tile[1]["tile_top"] + number_pixel_rows_for_tile
                         <= chunk["chunk_bottom"]
                         and tile[1]["tile_left"] + number_pixel_columns_for_tile
                         <= chunk["chunk_right"]
                         and tile[1]["tile_left"] >= chunk["chunk_left"]
                         and tile[1]["tile_top"] >= chunk["chunk_top"]
-                    }
-                    subsequent_chunks = [
-                        tile
-                        for tile in tiles_as_sorted_list
-                        if not (
-                            tile[1]["tile_top"] + number_pixel_rows_for_tile
-                            <= chunk["chunk_bottom"]
-                            and tile[1]["tile_left"] + number_pixel_columns_for_tile
-                            <= chunk["chunk_right"]
-                            and tile[1]["tile_left"] >= chunk["chunk_left"]
-                            and tile[1]["tile_top"] >= chunk["chunk_top"]
-                        )
-                    ]
+                    ):
+                        tiles[tile[0]] = tile[1]
+                    else:
+                        subsequent_chunks.append(tile)
 
                 # Update the list of tiles that are not yet in chunks
                 tiles_as_sorted_list = subsequent_chunks
@@ -242,7 +208,11 @@ class CreateTensorFlowDataset:
 
     @tf.function
     def _read_and_split_chunk_pixels(self, elem):
-        # Get chunk's pixel data from disk and load it into chunk_pixels_as_tensor
+        # Get chunk's pixel data from disk and load it into
+        # chunk_pixels_as_tensor.  Note that if elem["factor"] differs
+        # from 1.0 then this chunk will have number_of_rows
+        # ((chunk_bottom - chunk_top) / factor, and number_of_columns
+        # = ((chunk_right - chunk_left) / factor.
         chunk_pixels_as_tensor = tf.py_function(
             func=self._py_read_chunk_pixels,
             inp=[
@@ -252,11 +222,41 @@ class CreateTensorFlowDataset:
                 elem["chunk_right"],
                 elem["filename"],
                 elem["level"],
+                elem["factor"],
             ],
             Tout=tf.uint8,
         )
         number_of_tiles = tf.size(elem["tiles_top"])
         tiles = tf.TensorArray(dtype=tf.uint8, size=number_of_tiles)
+
+        scaled_number_pixel_rows_for_tile = tf.cast(
+            tf.math.floor(
+                tf.cast(elem["number_pixel_rows_for_tile"], dtype=tf.float64)
+                / elem["factor"]
+                + 0.01
+            ),
+            dtype=tf.int32,
+        )
+        scaled_number_pixel_columns_for_tile = tf.cast(
+            tf.math.floor(
+                tf.cast(elem["number_pixel_columns_for_tile"], dtype=tf.float64)
+                / elem["factor"]
+                + 0.01
+            ),
+            dtype=tf.int32,
+        )
+        scaled_chunk_top = tf.cast(
+            tf.math.floor(
+                tf.cast(elem["chunk_top"], dtype=tf.float64) / elem["factor"] + 0.01
+            ),
+            dtype=tf.int32,
+        )
+        scaled_chunk_left = tf.cast(
+            tf.math.floor(
+                tf.cast(elem["chunk_left"], dtype=tf.float64) / elem["factor"] + 0.01
+            ),
+            dtype=tf.int32,
+        )
 
         def condition(i, _):
             return tf.less(i, number_of_tiles)
@@ -268,10 +268,30 @@ class CreateTensorFlowDataset:
                     i,
                     tf.image.crop_to_bounding_box(
                         chunk_pixels_as_tensor,
-                        tf.gather(elem["tiles_top"], i) - elem["chunk_top"],
-                        tf.gather(elem["tiles_left"], i) - elem["chunk_left"],
-                        elem["number_pixel_rows_for_tile"],
-                        elem["number_pixel_columns_for_tile"],
+                        tf.cast(
+                            tf.math.floor(
+                                tf.cast(
+                                    tf.gather(elem["tiles_top"], i), dtype=tf.float64
+                                )
+                                / elem["factor"]
+                                + 0.01
+                            ),
+                            dtype=tf.int32,
+                        )
+                        - scaled_chunk_top,
+                        tf.cast(
+                            tf.math.floor(
+                                tf.cast(
+                                    tf.gather(elem["tiles_left"], i), dtype=tf.float64
+                                )
+                                / elem["factor"]
+                                + 0.01
+                            ),
+                            dtype=tf.int32,
+                        )
+                        - scaled_chunk_left,
+                        scaled_number_pixel_rows_for_tile,
+                        scaled_number_pixel_columns_for_tile,
                     ),
                 ),
             )
@@ -293,15 +313,15 @@ class CreateTensorFlowDataset:
         return response
 
     def _py_read_chunk_pixels(
-        self, chunk_top, chunk_left, chunk_bottom, chunk_right, filename, level=-1
+        self, chunk_top, chunk_left, chunk_bottom, chunk_right, filename, level, factor
     ):
         """Read from disk all the pixel data for a specific chunk of the whole slide."""
 
         filename = filename.numpy().decode("utf-8")
-        chunk_top = chunk_top.numpy()
-        chunk_left = chunk_left.numpy()
-        chunk_bottom = chunk_bottom.numpy()
-        chunk_right = chunk_right.numpy()
+        chunk_top = math.floor(chunk_top.numpy() / factor.numpy() + 0.01)
+        chunk_left = math.floor(chunk_left.numpy() / factor.numpy() + 0.01)
+        chunk_bottom = math.floor(chunk_bottom.numpy() / factor.numpy() + 0.01)
+        chunk_right = math.floor(chunk_right.numpy() / factor.numpy() + 0.01)
         level = level.numpy()
 
         if re.compile(r"\.svs$").search(filename):

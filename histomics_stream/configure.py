@@ -103,10 +103,21 @@ class FindResolutionForSlide:
                 self.desired_magnification, estimated, self.magnification_tolerance
             )
 
-            number_pixel_columns_for_slide = int(
-                ts.sizeX * estimated[level] // objective
+            # First compute the size of the slide using the chosen level
+            number_pixel_rows_for_slide = math.floor(
+                ts.sizeY * estimated[level] / objective
             )
-            number_pixel_rows_for_slide = int(ts.sizeY * estimated[level] // objective)
+            number_pixel_columns_for_slide = math.floor(
+                ts.sizeX * estimated[level] / objective
+            )
+            # Then adjust the size of the slide as if the desired magnification were
+            # exactly obtained
+            number_pixel_rows_for_slide = math.floor(
+                number_pixel_rows_for_slide * factor
+            )
+            number_pixel_columns_for_slide = math.floor(
+                number_pixel_columns_for_slide * factor
+            )
 
             # Rather than as the index into preferred_levels, change
             # level to be the value that large_image uses
@@ -129,10 +140,9 @@ class FindResolutionForSlide:
                 self.desired_magnification, estimated, self.magnification_tolerance
             )
 
-            # get slide number_pixel_columns_for_slide,
-            # number_pixel_rows_for_slide at desired
-            # magnification. (Note number_pixel_columns_for_slide
-            # before number_pixel_rows_for_slide)
+            # get slide number_pixel_columns_for_slide, number_pixel_rows_for_slide at
+            # desired magnification. (Note that number_pixel_columns_for_slide is before
+            # number_pixel_rows_for_slide)
             (
                 number_pixel_columns_for_slide,
                 number_pixel_rows_for_slide,
@@ -156,9 +166,8 @@ class FindResolutionForSlide:
                 self.desired_magnification, estimated, self.magnification_tolerance
             )
 
-            # get slide number_pixel_columns_for_slide,
-            # number_pixel_rows_for_slide at desired
-            # magnification. (Note number_pixel_rows_for_slide before
+            # get slide number_pixel_columns_for_slide, number_pixel_rows_for_slide at
+            # desired magnification. (Note that number_pixel_rows_for_slide is before
             # number_pixel_columns_for_slide)
             number_pixel_rows_for_slide, number_pixel_columns_for_slide = source_group[
                 format(level)
@@ -172,10 +181,16 @@ class FindResolutionForSlide:
             level = 0
             factor = 1.0
             pil_obj = Image.open(filename)
+            #  (Note that number_pixel_columns_for_slide is before
+            #  number_pixel_rows_for_slide)
             number_pixel_columns_for_slide, number_pixel_rows_for_slide = pil_obj.size
 
         slide["level"] = level
         slide["factor"] = factor
+        # Note that slide size is defined by the requested magnification, which may not
+        # be the same as the magnification for the selected level.  To get the slide
+        # size for the magnification that we are using, these values must later be
+        # divided by slide["factor"].
         slide["number_pixel_rows_for_slide"] = number_pixel_rows_for_slide
         slide["number_pixel_columns_for_slide"] = number_pixel_columns_for_slide
 
@@ -553,11 +568,7 @@ class TilesRandomly:
 
     """
 
-    def __init__(
-        self,
-        study,
-        randomly_select=1,  # Defaults to select one
-    ):
+    def __init__(self, study, randomly_select=1):  # Defaults to select one
         """Sanity check the supplied parameters and store them for later use."""
         # Check values.
         if not ("version" in study and study["version"] == "version-1"):
