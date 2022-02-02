@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="histomics_stream",
-    version="2.1.5",
+    version="2.1.6",
     author="Lee Newberg",
     author_email="lee.newberg@kitware.com",
     description="A TensorFlow 2 package for reading whole slide images",
@@ -17,14 +17,15 @@ setuptools.setup(
         "histomics_stream": "histomics_stream",
     },
     install_requires=[
-        "tensorflow>=2.6.0,<2.7",
-        "itk",
-        "pillow",
+        # tensorflow is not listed as a requirement because the user
+        # will likely want to specify the version for compatibility
+        # with the CUDA libraries, presence of GPUs, etc.
         "imagecodecs",
+        "itk",
+        "numpy",
         "openslide-python",
+        "pillow",
         "zarr",
-        "napari_lazy_openslide",
-        "tifffile",
     ],
     license="Apache Software License 2.0",
     keywords="histomics_stream",
