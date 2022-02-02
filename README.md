@@ -16,7 +16,7 @@ histomics_stream can be easily installed with Python wheels.  If you do not want
 apt update
 apt install -y python3-openslide openslide-tools
 pip uninstall -y histomics_stream large_image tensorflow
-pip install histomics_stream 'large_image[all]' --find-links https://girder.github.io/large_image_wheels
+pip install histomics_stream 'large_image[openslide,ometiff,openjpeg,bioformats]' --find-links https://girder.github.io/large_image_wheels
 ```
 
 Launch `python3`, import the histomics_stream package, and use it
