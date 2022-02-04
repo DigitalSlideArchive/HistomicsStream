@@ -9,9 +9,9 @@ import re
 class FindResolutionForSlide:
     """A class that computes read parameters for slides.
 
-    An instance of class FindResolutionForSlide is a callable that will add level,
-    factor, number_pixel_rows_for_slide, and number_pixel_columns_for_slide fields to a
-    slide dictionary.
+    An instance of class FindResolutionForSlide is a callable that
+    will add level, factor, number_pixel_rows_for_slide, and
+    number_pixel_columns_for_slide fields to a slide dictionary.
 
     Parameters for the constructor
     ------------------------------
@@ -253,6 +253,10 @@ class TilesByGridAndMask:
         image ( in terms of its grid of tiles).  A non-zero value in
         the mask indicates that the tile should be retained.  The
         default is "", which means that there is no masking.
+    mask_threshold : float
+        A value in [0.0, 1.1].  A tile is retained if the fraction of
+        the tile overlapping non-zero pixels in the mask is at least
+        the mask_threshold.
 
     """
 
@@ -263,6 +267,7 @@ class TilesByGridAndMask:
         number_pixel_overlap_rows_for_tile=0,  # Defaults to no overlap between adjacent tiles
         number_pixel_overlap_columns_for_tile=0,
         mask_filename="",  # Defaults to no masking
+        mask_threshold=0.0,  # Defaults to any overlap with the mask
     ):
         """Sanity check the supplied parameters and store them for later use."""
         # Check values.
@@ -314,8 +319,16 @@ class TilesByGridAndMask:
             mask_itk = itk.imread(mask_filename)  # May throw exception
             if mask_itk.GetImageDimension() != 2:
                 raise ValueError(
-                    f"The mask ({mask_filename})" " should be a 2-dimensional image."
+                    f"The mask ({mask_filename}) should be a 2-dimensional image."
                 )
+        if not (
+            isinstance(mask_threshold, float)
+            and mask_threshold >= 0.0
+            and mask_threshold <= 1.0
+        ):
+            raise ValueError(
+                f"mask_threshold ({mask_threshold}) must be between 0 and 1 inclusive."
+            )
 
         # Save values.  To keep garbage collection efficient don't save all of `study`.
         self.number_pixel_rows_for_tile = study["number_pixel_rows_for_tile"]
@@ -326,8 +339,9 @@ class TilesByGridAndMask:
             number_pixel_overlap_columns_for_tile
         )
         self.mask_filename = mask_filename
-        if mask_filename != "":
+        if self.mask_filename != "":
             self.mask_itk = mask_itk
+        self.mask_threshold = mask_threshold
 
     def __call__(self, slide):
         """Select tiles according to a regular grid.  Optionally, restrict the list by a mask.
@@ -338,92 +352,119 @@ class TilesByGridAndMask:
             raise ValueError(
                 'slide["number_pixel_rows_for_slide"] must be already set.'
             )
+        self.number_pixel_rows_for_slide = slide["number_pixel_rows_for_slide"]
         if "number_pixel_columns_for_slide" not in slide:
             raise ValueError(
                 'slide["number_pixel_columns_for_slide"] must be already set.'
             )
 
+        self.number_pixel_columns_for_slide = slide["number_pixel_columns_for_slide"]
+        #
         # Do the work.
+        #
         row_stride = (
             self.number_pixel_rows_for_tile - self.number_pixel_overlap_rows_for_tile
-        )
-        number_tile_rows_for_slide = slide["number_tile_rows_for_slide"] = math.floor(
-            (
-                slide["number_pixel_rows_for_slide"]
-                - self.number_pixel_overlap_rows_for_tile
-            )
-            / row_stride
         )
         column_stride = (
             self.number_pixel_columns_for_tile
             - self.number_pixel_overlap_columns_for_tile
         )
-        number_tile_columns_for_slide = slide[
-            "number_tile_columns_for_slide"
-        ] = math.floor(
+
+        # Return information to the user
+        slide["number_tile_rows_for_slide"] = math.floor(
+            (self.number_pixel_rows_for_slide - self.number_pixel_overlap_rows_for_tile)
+            / row_stride
+        )
+        slide["number_tile_columns_for_slide"] = math.floor(
             (
-                slide["number_pixel_columns_for_slide"]
+                self.number_pixel_columns_for_slide
                 - self.number_pixel_overlap_columns_for_tile
             )
             / column_stride
         )
+
+        # Pre-process the mask
         has_mask = hasattr(self, "mask_itk")
         if has_mask:
-            # We will change the resolution of the mask (if necessary), which will
-            # change the number of pixels, but will not change the overall physical size
-            # represented by the image nor the position of the upper left corner of its
-            # upper left pixel.
-            input_size = itk.size(self.mask_itk)
-            output_size = [number_tile_columns_for_slide, number_tile_rows_for_slide]
-            if input_size != output_size:
-                # print(f"Resampling from input_size = {input_size} to output_size = {output_size}")
-                # Check that the input and output aspect ratios are pretty close
-                if (
-                    abs(
-                        math.log(
-                            (output_size[0] / input_size[0])
-                            / (output_size[1] / input_size[1])
+            (
+                self.number_pixel_columns_for_mask,
+                self.number_pixel_rows_for_mask,
+            ) = itk.size(self.mask_itk)
+            slide["number_pixel_rows_for_mask"] = self.number_pixel_rows_for_mask
+            slide["number_pixel_columns_for_mask"] = self.number_pixel_columns_for_mask
+
+            # Check that the input and output aspect ratios are pretty close
+            if (
+                abs(
+                    math.log(
+                        (
+                            self.number_pixel_columns_for_slide
+                            / self.number_pixel_columns_for_mask
+                        )
+                        / (
+                            self.number_pixel_rows_for_slide
+                            / self.number_pixel_rows_for_mask
                         )
                     )
-                    > 0.20
-                ):
-                    raise ValueError(
-                        "The mask aspect ratio does not match that for the number of tiles."
-                    )
-                input_spacing = itk.spacing(self.mask_itk)
-                input_origin = itk.origin(self.mask_itk)
-                image_dimension = self.mask_itk.GetImageDimension()
-                output_spacing = [
-                    input_spacing[d] * input_size[d] / output_size[d]
-                    for d in range(image_dimension)
-                ]
-                output_origin = [
-                    input_origin[d] + 0.5 * (output_spacing[d] - input_spacing[d])
-                    for d in range(image_dimension)
-                ]
-                interpolator = itk.NearestNeighborInterpolateImageFunction.New(
-                    self.mask_itk
                 )
-                resampled_mask_itk = itk.resample_image_filter(
-                    self.mask_itk,
-                    interpolator=interpolator,
-                    size=output_size,
-                    output_spacing=output_spacing,
-                    output_origin=output_origin,
+                > 0.20
+            ):
+                raise ValueError(
+                    "The mask aspect ratio does not match that for the whole slide image."
                 )
-            else:
-                resampled_mask_itk = self.mask_itk
 
+            # cumulative_mask[row, column] will be the number of mask_itk[r, c] (i.e.,
+            # mask_itk.GetPixel((c,r))) values that are nonzero among all those with r <
+            # row and c < column.  We have added a boundary on all sides of this array
+            # -- zeros on the top and left, and a duplicate row (column) on the bottom
+            # (right) -- so that we do not need to do extra testing in our code at the
+            # borders.  We use int64 in case there are 2^31 (~2 billion = ~ 46k by 46k)
+            # or more pixels in our mask.
+            self.cumulative_mask = np.zeros(
+                (
+                    self.number_pixel_rows_for_mask + 2,
+                    self.number_pixel_columns_for_mask + 2,
+                ),
+                dtype=np.int64,
+            )
+            # Fill in bulk of the array
+            for row in range(self.number_pixel_rows_for_mask):
+                for column in range(self.number_pixel_columns_for_mask):
+                    self.cumulative_mask[row + 1, column + 1] = (
+                        int(self.mask_itk[row, column] != 0)
+                        + self.cumulative_mask[row, column + 1]
+                        + self.cumulative_mask[row + 1, column]
+                        - self.cumulative_mask[row, column]
+                    )
+            # Fill in the last column
+            for row in range(self.number_pixel_rows_for_mask):
+                self.cumulative_mask[
+                    row + 1, self.number_pixel_columns_for_mask + 1
+                ] = self.cumulative_mask[row + 1, self.number_pixel_columns_for_mask]
+            # Fill in the last row
+            for column in range(self.number_pixel_columns_for_mask + 1):
+                self.cumulative_mask[
+                    self.number_pixel_rows_for_mask + 1, column + 1
+                ] = self.cumulative_mask[self.number_pixel_rows_for_mask, column + 1]
+
+        # Look at each tile in turn
         tiles = slide["tiles"] = {}
         number_of_tiles = 0
-        for row in range(number_tile_rows_for_slide):
-            for column in range(number_tile_columns_for_slide):
-                if not (has_mask and resampled_mask_itk[row, column] == 0):
+        top_too_high = (
+            self.number_pixel_rows_for_slide - self.number_pixel_rows_for_tile + 1
+        )
+        left_too_high = (
+            self.number_pixel_columns_for_slide - self.number_pixel_columns_for_tile + 1
+        )
+        for top in range(0, top_too_high, row_stride):
+            for left in range(0, left_too_high, column_stride):
+                if not (has_mask and self.mask_rejects(top, left)):
                     tiles[f"tile_{number_of_tiles}"] = {
-                        "tile_top": row * row_stride,
-                        "tile_left": column * column_stride,
+                        "tile_top": top,
+                        "tile_left": left,
                     }
                 number_of_tiles += 1  # Increment even if tile is skipped.
+
         # Choose a subset of the tiles randomly
         all_tile_names = tiles.keys()
         if 0 <= self.randomly_select < len(all_tile_names):
@@ -432,6 +473,66 @@ class TilesByGridAndMask:
             )
             for key in keys_to_remove:
                 del tiles[key]
+
+    def interpolate_cumulative(self, row, column):
+        top = int(math.floor(row))
+        left = int(math.floor(column))
+        vertical_range = row - top
+        horizontal_range = column - left
+        response = (
+            self.cumulative_mask[top, left]
+            * (1.0 - vertical_range)
+            * (1.0 - horizontal_range)
+            + self.cumulative_mask[top + 1, left]
+            * vertical_range
+            * (1.0 - horizontal_range)
+            + self.cumulative_mask[top, left + 1]
+            * (1.0 - vertical_range)
+            * horizontal_range
+            + self.cumulative_mask[top + 1, left + 1]
+            * vertical_range
+            * horizontal_range
+        )
+        return response
+
+    def mask_rejects(self, top, left):
+        bottom = top + self.number_pixel_rows_for_tile
+        right = left + self.number_pixel_columns_for_tile
+        mask_top = (
+            top / self.number_pixel_rows_for_slide * self.number_pixel_rows_for_mask
+        )
+        mask_bottom = (
+            bottom / self.number_pixel_rows_for_slide * self.number_pixel_rows_for_mask
+        )
+        mask_left = (
+            left
+            / self.number_pixel_columns_for_slide
+            * self.number_pixel_columns_for_mask
+        )
+        mask_right = (
+            right
+            / self.number_pixel_columns_for_slide
+            * self.number_pixel_columns_for_mask
+        )
+        cumulative_top_left = self.interpolate_cumulative(mask_top, mask_left)
+        cumulative_top_right = self.interpolate_cumulative(mask_top, mask_right)
+        cumulative_bottom_left = self.interpolate_cumulative(mask_bottom, mask_left)
+        cumulative_bottom_right = self.interpolate_cumulative(mask_bottom, mask_right)
+        cumulative = (
+            cumulative_bottom_right
+            - cumulative_bottom_left
+            - cumulative_top_right
+            + cumulative_top_left
+        )
+        if self.mask_threshold > 0:
+            score = cumulative / (
+                self.mask_threshold
+                * (mask_bottom - mask_top)
+                * (mask_right - mask_left)
+            )
+            return score < 0.999999
+        else:
+            return cumulative < 0.000001
 
 
 class TilesByList:
