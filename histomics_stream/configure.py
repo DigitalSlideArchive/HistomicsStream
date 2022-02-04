@@ -387,9 +387,9 @@ class TilesByGridAndMask:
         has_mask = hasattr(self, "mask_itk")
         if has_mask:
             (
-                self.number_pixel_columns_for_mask,
                 self.number_pixel_rows_for_mask,
-            ) = itk.size(self.mask_itk)
+                self.number_pixel_columns_for_mask,
+            ) = self.mask_itk.shape
             slide["number_pixel_rows_for_mask"] = self.number_pixel_rows_for_mask
             slide["number_pixel_columns_for_mask"] = self.number_pixel_columns_for_mask
 
@@ -415,11 +415,12 @@ class TilesByGridAndMask:
 
             # cumulative_mask[row, column] will be the number of mask_itk[r, c] (i.e.,
             # mask_itk.GetPixel((c,r))) values that are nonzero among all those with r <
-            # row and c < column.  We have added a boundary on all sides of this array
-            # -- zeros on the top and left, and a duplicate row (column) on the bottom
-            # (right) -- so that we do not need to do extra testing in our code at the
-            # borders.  We use int64 in case there are 2^31 (~2 billion = ~ 46k by 46k)
-            # or more pixels in our mask.
+            # row and c < column; note the strict inequalities.  We have added a
+            # boundary on all sides of this array -- zeros on the top and left, and a
+            # duplicate row (column) on the bottom (right) -- so that we do not need to
+            # do extra testing in our code at the borders.  We use int64 in case there
+            # are 2^31 (~2 billion = ~ 46k by 46k) or more non-zero pixel values in our
+            # mask.
             self.cumulative_mask = np.zeros(
                 (
                     self.number_pixel_rows_for_mask + 2,
@@ -427,25 +428,14 @@ class TilesByGridAndMask:
                 ),
                 dtype=np.int64,
             )
-            # Fill in bulk of the array
-            for row in range(self.number_pixel_rows_for_mask):
-                for column in range(self.number_pixel_columns_for_mask):
-                    self.cumulative_mask[row + 1, column + 1] = (
-                        int(self.mask_itk[row, column] != 0)
-                        + self.cumulative_mask[row, column + 1]
-                        + self.cumulative_mask[row + 1, column]
-                        - self.cumulative_mask[row, column]
-                    )
-            # Fill in the last column
-            for row in range(self.number_pixel_rows_for_mask):
-                self.cumulative_mask[
-                    row + 1, self.number_pixel_columns_for_mask + 1
-                ] = self.cumulative_mask[row + 1, self.number_pixel_columns_for_mask]
-            # Fill in the last row
-            for column in range(self.number_pixel_columns_for_mask + 1):
-                self.cumulative_mask[
-                    self.number_pixel_rows_for_mask + 1, column + 1
-                ] = self.cumulative_mask[self.number_pixel_rows_for_mask, column + 1]
+            nonzero = np.vectorize(lambda x: int(x != 0))
+            self.cumulative_mask[
+                1 : self.number_pixel_rows_for_mask + 1,
+                1 : self.number_pixel_columns_for_mask + 1,
+            ] = nonzero(itk.GetArrayViewFromImage(self.mask_itk))
+            self.cumulative_mask = np.cumsum(
+                np.cumsum(self.cumulative_mask, axis=0), axis=1
+            )
 
         # Look at each tile in turn
         tiles = slide["tiles"] = {}
