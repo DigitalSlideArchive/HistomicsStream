@@ -22,25 +22,25 @@ class FindResolutionForSlide:
         The path of the image file to be read.
 
     target_magnification : float
-        The desired reference magnification.  For example, a value of
-        10 corresponses to about 1 micron per pixel and a value of 20
-        corresponds to about 0.5 microns per pixel.
+        The desired objective magnification for generated tiles.  For 
+        example, a value of 10 corresponds to about 1 micron per pixel 
+        and a value of 20 corresponds to about 0.5 microns per pixel.
 
     magnification_source : str in ["scan", "native", "exact"]
-        If set to "scan" then the pixel values from the highest
-        magnification available in the source file will be read and
-        returned.
+        "scan" will produce tiles from the highest magnification
+        avaialable. This is typically the slide scanner's objective
+        magnification.
 
-        If set to "native" then the magnification to read and return
-        will be selected from one of the possible magnifications
-        natively available from the source file; the magnification
-        that is selected will be the one that is nearest the
-        target_magnification among all those that are at least 98% of
-        the target magnification.
+        "native" will produce tiles from the nearest available
+        magnification equal to or greater than target_magnification 
+        (within a 2% tolerance). The "native" option is useful when 
+        you want to handle resizing of tiles to target_magnification 
+        on your own.
 
-        If set to "exact", the "native" magnification will be read
-        from the file and, if necessary, it will be resampled so that
-        it is the target_magnification.
+        "exact" will produce tiles using "native" option and then
+        resize these tiles to match target_magnification. Resizing
+        is handled by PIL using the Lanczos antialiasing filter
+        since the resizing shrinks the tile by definition.
 
         For either "scan" or "native", the size of the read and
         returned tiles will be (tile_height * returned_magnification /
@@ -48,14 +48,16 @@ class FindResolutionForSlide:
         target_magnification).  For "exact" the size of the returned
         tiles will be (tile_height, tile_width).
 
-        In all cases the returned "scan_magnification" will be the
-        highest magnification from the source file;
-        "read_magnification" will be the magnification from the source
-        file that is read; and "returned_magnification" will be the
-        same as "read_magnification" in the case of "scan" or "native"
-        and will be the same as "target_magnification" in the case of
-        "exact".
-
+        This procedure sets values in the slide dictionary to capture
+        the scan, read, and returned magnification of the tiles. This is
+        helpful for example to resize results to the scan magnification
+        for visualization in HistomicsUI, or to resize between native
+        and target magnification when using "native". "scan_magnification" 
+        is the highest magnification from the source file; "read_magnification" 
+        is the magnification read from the source file; "returned_magnification" 
+        is the magnification of the returned tiles which is same as 
+        "read_magnification" in the case  of "scan" or "native" or 
+        "target_magnification" in the case of "exact".
     """
 
     def __init__(self, study, target_magnification, magnification_source):
@@ -89,7 +91,6 @@ class FindResolutionForSlide:
         read_magnification, returned_magnification,
         number_pixel_rows_for_slide, and
         number_pixel_columns_for_slide fields to a slide dictionary.
-
         """
 
         # Check values.
