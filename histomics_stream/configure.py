@@ -10,56 +10,87 @@ class FindResolutionForSlide:
     """A class that computes read parameters for slides.
 
     An instance of class FindResolutionForSlide is a callable that
-    will add level, factor, number_pixel_rows_for_slide, and
-    number_pixel_columns_for_slide fields to a slide dictionary.
+    will add level, target_magnification, scan_magnification,
+    read_magnification, returned_magnification,
+    number_pixel_rows_for_slide, and number_pixel_columns_for_slide
+    fields to a slide dictionary.
 
     Parameters for the constructor
     ------------------------------
+
     filename : string
         The path of the image file to be read.
-    desired_magnification : float
-        The desired magnification to be read from the file when
-        multiple resolutions are available.  For example, a value of
-        10 corresponses to about 1 micron per pixel and a value of 20
-        corresponds to about 0.5 microns per pixel.
-    magnification_tolerance : float
-        For example a value of 0.02 allows selection of an image that
-        has a magnification of up to 2% different from the desired
-        magnification.  If no such image exists, the image with
-        greater magnification will be selected.
 
+    target_magnification : float
+        The desired objective magnification for generated tiles.  For 
+        example, a value of 10 corresponds to about 1 micron per pixel 
+        and a value of 20 corresponds to about 0.5 microns per pixel.
+
+    magnification_source : str in ["scan", "native", "exact"]
+        "scan" will produce tiles from the highest magnification
+        avaialable. This is typically the slide scanner's objective
+        magnification.
+
+        "native" will produce tiles from the nearest available
+        magnification equal to or greater than target_magnification 
+        (within a 2% tolerance). The "native" option is useful when 
+        you want to handle resizing of tiles to target_magnification 
+        on your own.
+
+        "exact" will produce tiles using "native" option and then
+        resize these tiles to match target_magnification. Resizing
+        is handled by PIL using the Lanczos antialiasing filter
+        since the resizing shrinks the tile by definition.
+
+        For either "scan" or "native", the size of the read and
+        returned tiles will be (tile_height * returned_magnification /
+        target_magnification, tile_width * returned_magnification /
+        target_magnification).  For "exact" the size of the returned
+        tiles will be (tile_height, tile_width).
+
+        This procedure sets values in the slide dictionary to capture
+        the scan, read, and returned magnification of the tiles. This is
+        helpful for example to resize results to the scan magnification
+        for visualization in HistomicsUI, or to resize between native
+        and target magnification when using "native". "scan_magnification" 
+        is the highest magnification from the source file; "read_magnification" 
+        is the magnification read from the source file; "returned_magnification" 
+        is the magnification of the returned tiles which is same as 
+        "read_magnification" in the case  of "scan" or "native" or 
+        "target_magnification" in the case of "exact".
     """
 
-    def __init__(self, study, desired_magnification, magnification_tolerance):
+    def __init__(self, study, target_magnification, magnification_source):
         """Sanity check the supplied parameters and store them for later use."""
         # Check values.
         if not ("version" in study and study["version"] == "version-1"):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
         if not (
-            isinstance(desired_magnification, (int, float))
-            and 0 < desired_magnification
+            isinstance(target_magnification, (int, float)) and 0 < target_magnification
         ):
             raise ValueError(
-                f"desired_magnification ({desired_magnification})"
+                f"target_magnification ({target_magnification})"
                 " must be a positive number"
             )
         if not (
-            isinstance(magnification_tolerance, (int, float))
-            and 0 <= magnification_tolerance <= 1
+            isinstance(magnification_source, str)
+            and magnification_source in ["scan", "native", "exact"]
         ):
             raise ValueError(
-                f"magnification_tolerance ({magnification_tolerance})"
-                " must be a value in [0, 1]"
+                f"magnification_source ({magnification_source})"
+                " must be one of {['scan', 'native', 'exact']}."
             )
 
         # Save values.
-        self.desired_magnification = desired_magnification
-        self.magnification_tolerance = magnification_tolerance
+        self.target_magnification = target_magnification
+        self.magnification_source = magnification_source
 
     def __call__(self, slide):
-        """Add level, factor, number_pixel_rows_for_slide, and number_pixel_columns_for_slide
-        fields to a slide dictionary.
-
+        """
+        Add level, target_magnification, scan_magnification,
+        read_magnification, returned_magnification,
+        number_pixel_rows_for_slide, and
+        number_pixel_columns_for_slide fields to a slide dictionary.
         """
 
         # Check values.
@@ -74,97 +105,126 @@ class FindResolutionForSlide:
             # read whole-slide image file and create large_image object
             ts = large_image.open(filename)
 
-            # measure objective of level 0
-            objective = np.float32(ts.getNativeMagnification()["magnification"])
+            # scan_magnification = highest available magnification from source
+            scan_magnification = np.float32(
+                ts.getNativeMagnification()["magnification"]
+            )
 
-            if False:
-                # Use the level that large_image is willing to interpolate for us.
+            if self.magnification_source == "exact":
+                # Use the tile-source level that large_image is
+                # willing to interpolate for us.
                 preferred_levels = [
                     ts.getLevelForMagnification(
-                        self.desired_magnification, rounding=False
+                        self.target_magnification, rounding=False
                     )
                 ]
-            else:
-                # Use one of the levels that is stored in the image file.
+            else:  # self.magnification_source in ["scan", "native"]
+                # Use one of the tile-source levels that is stored in the image file.
                 preferred_levels = list(
                     set(ts.getPreferredLevel(level) for level in range(ts.levels))
                 )
                 preferred_levels.sort(reverse=True)
+                if self.magnification_source == "scan":
+                    # Keep only the maximum tile-source level
+                    preferred_levels = preferred_levels[0:1]
 
-            estimated = np.array(
+            estimated_magnifications = np.array(
                 [
                     ts.getMagnificationForLevel(level)["magnification"]
                     for level in preferred_levels
                 ]
             )
 
-            # Find best native level to use and its factor
-            level, factor = self._get_level_and_factor(
-                self.desired_magnification, estimated, self.magnification_tolerance
+            # Find best tile-source level to use
+            (level, returned_magnification) = self._get_level_and_magnifications(
+                self.target_magnification, estimated_magnifications
             )
-
-            # First compute the size of the slide using the chosen level
-            number_pixel_rows_for_slide = math.floor(
-                ts.sizeY * estimated[level] / objective
-            )
-            number_pixel_columns_for_slide = math.floor(
-                ts.sizeX * estimated[level] / objective
-            )
-            # Then adjust the size of the slide as if the desired magnification were
-            # exactly obtained
-            number_pixel_rows_for_slide = math.floor(
-                number_pixel_rows_for_slide * factor
-            )
-            number_pixel_columns_for_slide = math.floor(
-                number_pixel_columns_for_slide * factor
-            )
-
             # Rather than as the index into preferred_levels, change
             # level to be the value that large_image uses
             level = preferred_levels[level]
 
-        elif re.compile(r"\.svs$").search(filename):
-            import openslide as os
+            # If large_image is resampling a native level for us, it
+            # is starting with the preferred level that is the least
+            # one that is not smaller than the resampled level.
+            read_magnification = ts.getMagnificationForLevel(
+                min([ts.getPreferredLevel(i) for i in range(ts.levels) if i >= level])
+            )["magnification"]
 
-            # read whole-slide image file and create openslide object
-            os_obj = os.OpenSlide(filename)
+            slide["target_magnification"] = self.target_magnification
+            slide["scan_magnification"] = scan_magnification
+            slide["read_magnification"] = read_magnification
+            slide["returned_magnification"] = returned_magnification
 
-            # measure objective of level 0
-            objective = np.float32(os_obj.properties[os.PROPERTY_NAME_OBJECTIVE_POWER])
-
-            # calculate magnifications of levels
-            estimated = np.array(objective / os_obj.level_downsamples)
-
-            # Find best native level to use and its factor
-            level, factor = self._get_level_and_factor(
-                self.desired_magnification, estimated, self.magnification_tolerance
-            )
-
-            # get slide number_pixel_columns_for_slide, number_pixel_rows_for_slide at
-            # desired magnification. (Note that number_pixel_columns_for_slide is before
-            # number_pixel_rows_for_slide)
-            (
-                number_pixel_columns_for_slide,
-                number_pixel_rows_for_slide,
-            ) = os_obj.level_dimensions[level]
+            # We don't want to walk off the right or bottom of the slide so we are
+            # conservative as to how many pixels large_image will return for us.
+            # 1) large_image starts with an image that is of read_mangification; we
+            #    compute the dimensions for read_magnification with math.floor from the
+            #    dimensions of scan_magnification (i.e., ts.sizeX and ts.sizeY) to be
+            #    conservative.
+            # 2) large_image or external software may resampled from the
+            #    read_mangification to the target_magnification; we compute dimensions
+            #    for the target_magnification with math.floor from the
+            #    read_magnification to be conservative.
+            number_pixel_rows_for_slide = ts.sizeY
+            number_pixel_columns_for_slide = ts.sizeX
+            if scan_magnification != read_magnification:
+                number_pixel_rows_for_slide = math.floor(
+                    number_pixel_rows_for_slide
+                    * read_magnification
+                    / scan_magnification
+                )
+                number_pixel_columns_for_slide = math.floor(
+                    number_pixel_columns_for_slide
+                    * read_magnification
+                    / scan_magnification
+                )
+            if read_magnification != self.target_magnification:
+                number_pixel_rows_for_slide = math.floor(
+                    number_pixel_rows_for_slide
+                    * self.target_magnification
+                    / read_magnification
+                )
+                number_pixel_columns_for_slide = math.floor(
+                    number_pixel_columns_for_slide
+                    * self.target_magnification
+                    / read_magnification
+                )
 
         elif re.compile(r"\.zarr$").search(filename):
             import zarr
+            import openslide as os
 
             # read whole-slide image and create zarr objects
             store = zarr.DirectoryStore(filename)
             source_group = zarr.open(store, mode="r")
 
-            # measure objective of level 0
-            objective = np.float32(source_group.attrs[os.PROPERTY_NAME_OBJECTIVE_POWER])
+            # scan_magnification = highest available magnification from source
+            scan_magnification = np.float32(
+                source_group.attrs[os.PROPERTY_NAME_OBJECTIVE_POWER]
+            )
+
+            preferred_levels = list(range(0, source_group.attrs["level_downsamples"]))
+            if self.magnification_source == "scan":
+                preferred_levels = [np.argmin(source_group.attrs["level_downsamples"])]
 
             # calculate magnifications of levels
-            estimated = np.array(objective / source_group.attrs["level_downsamples"])
-
-            # Find best native level to use and its factor
-            level, factor = self._get_level_and_factor(
-                self.desired_magnification, estimated, self.magnification_tolerance
+            estimated_magnifications = np.array(
+                scan_magnification / source_group.attrs["level_downsamples"][level]
+                for level in preferred_levels
             )
+
+            # Find best native level to use
+            (level, returned_magnification) = self._get_level_and_magnifications(
+                self.target_magnification, estimated_magnifications
+            )
+            # Rather than as the index into preferred_levels, change
+            # level to be the value that zarr uses
+            level = preferred_levels[level]
+
+            slide["target_magnification"] = self.target_magnification
+            slide["scan_magnification"] = scan_magnification
+            slide["read_magnification"] = returned_magnification
+            slide["returned_magnification"] = returned_magnification
 
             # get slide number_pixel_columns_for_slide, number_pixel_rows_for_slide at
             # desired magnification. (Note that number_pixel_rows_for_slide is before
@@ -173,49 +233,61 @@ class FindResolutionForSlide:
                 format(level)
             ].shape[0:2]
 
+            if (
+                self.magnification_source == "exact"
+                and self.target_magnification != returned_magnification
+            ):
+                raise ValueError(
+                    f"Couldn't find magnification {self.target_magnification}X in Zarr storage."
+                )
+
         else:
             from PIL import Image
 
             # We don't know magnifications so assume reasonable values
-            # for level and factor.
             level = 0
-            factor = 1.0
+            slide["target_magnification"] = self.target_magnification
+            slide["scan_magnification"] = None
+            slide["read_magnification"] = None
+            slide["returned_magnification"] = None
+
             pil_obj = Image.open(filename)
             #  (Note that number_pixel_columns_for_slide is before
             #  number_pixel_rows_for_slide)
             number_pixel_columns_for_slide, number_pixel_rows_for_slide = pil_obj.size
 
         slide["level"] = level
-        slide["factor"] = factor
         # Note that slide size is defined by the requested magnification, which may not
         # be the same as the magnification for the selected level.  To get the slide
         # size for the magnification that we are using, these values must later be
-        # divided by slide["factor"].
+        # multiplied by returned_magnification / target_magnification.
         slide["number_pixel_rows_for_slide"] = number_pixel_rows_for_slide
         slide["number_pixel_columns_for_slide"] = number_pixel_columns_for_slide
 
-    def _get_level_and_factor(
-        self, desired_magnification, estimated, magnification_tolerance
+    def _get_level_and_magnifications(
+        self, target_magnification, estimated_magnifications
     ):
-        """A private subroutine that computes level and factor."""
+        """A private subroutine that computes level and magnifications."""
         # calculate difference with magnification levels
-        delta = desired_magnification - estimated
+
+        magnification_tolerance = 0.02
+        delta = target_magnification - estimated_magnifications
 
         # match to existing levels
         if (
-            np.min(np.abs(np.divide(delta, desired_magnification)))
+            np.min(np.abs(np.divide(delta, target_magnification)))
             < magnification_tolerance
         ):  # match
             level = np.squeeze(np.argmin(np.abs(delta)))
-            factor = 1.0
         elif np.any(delta < 0):
             value = np.max(delta[delta < 0])
             level = np.squeeze(np.argwhere(delta == value)[0])
-            factor = desired_magnification / estimated[level]
         else:  # desired magnification above base level - throw error
             raise ValueError("Cannot interpolate above scan magnification.")
 
-        return level, factor
+        returned_magnification = estimated_magnifications[level]
+
+        return level, returned_magnification
 
 
 class TilesByGridAndMask:

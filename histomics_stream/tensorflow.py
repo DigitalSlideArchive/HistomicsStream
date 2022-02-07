@@ -213,6 +213,9 @@ class CreateTensorFlowDataset:
         # from 1.0 then this chunk will have number_of_rows
         # ((chunk_bottom - chunk_top) / factor, and number_of_columns
         # = ((chunk_right - chunk_left) / factor.
+        factor = tf.cast(elem["target_magnification"], dtype=tf.float32) / tf.cast(
+            elem["returned_magnification"], dtype=tf.float32
+        )
         chunk_pixels_as_tensor = tf.py_function(
             func=self._py_read_chunk_pixels,
             inp=[
@@ -222,7 +225,7 @@ class CreateTensorFlowDataset:
                 elem["chunk_right"],
                 elem["filename"],
                 elem["level"],
-                elem["factor"],
+                factor,
             ],
             Tout=tf.uint8,
         )
@@ -231,8 +234,7 @@ class CreateTensorFlowDataset:
 
         scaled_number_pixel_rows_for_tile = tf.cast(
             tf.math.floor(
-                tf.cast(elem["number_pixel_rows_for_tile"], dtype=tf.float32)
-                / tf.cast(elem["factor"], dtype=tf.float32)
+                tf.cast(elem["number_pixel_rows_for_tile"], dtype=tf.float32) / factor
                 + tf.convert_to_tensor(0.01, dtype=tf.float32)
             ),
             dtype=tf.int32,
@@ -240,23 +242,21 @@ class CreateTensorFlowDataset:
         scaled_number_pixel_columns_for_tile = tf.cast(
             tf.math.floor(
                 tf.cast(elem["number_pixel_columns_for_tile"], dtype=tf.float32)
-                / tf.cast(elem["factor"], dtype=tf.float32)
+                / factor
                 + tf.convert_to_tensor(0.01, dtype=tf.float32)
             ),
             dtype=tf.int32,
         )
         scaled_chunk_top = tf.cast(
             tf.math.floor(
-                tf.cast(elem["chunk_top"], dtype=tf.float32)
-                / tf.cast(elem["factor"], dtype=tf.float32)
+                tf.cast(elem["chunk_top"], dtype=tf.float32) / factor
                 + tf.convert_to_tensor(0.01, dtype=tf.float32)
             ),
             dtype=tf.int32,
         )
         scaled_chunk_left = tf.cast(
             tf.math.floor(
-                tf.cast(elem["chunk_left"], dtype=tf.float32)
-                / tf.cast(elem["factor"], dtype=tf.float32)
+                tf.cast(elem["chunk_left"], dtype=tf.float32) / factor
                 + tf.convert_to_tensor(0.01, dtype=tf.float32)
             ),
             dtype=tf.int32,
@@ -277,7 +277,7 @@ class CreateTensorFlowDataset:
                                 tf.cast(
                                     tf.gather(elem["tiles_top"], i), dtype=tf.float32
                                 )
-                                / tf.cast(elem["factor"], dtype=tf.float32)
+                                / factor
                                 + tf.convert_to_tensor(0.01, dtype=tf.float32)
                             ),
                             dtype=tf.int32,
@@ -288,7 +288,7 @@ class CreateTensorFlowDataset:
                                 tf.cast(
                                     tf.gather(elem["tiles_left"], i), dtype=tf.float32
                                 )
-                                / tf.cast(elem["factor"], dtype=tf.float32)
+                                / factor
                                 + tf.convert_to_tensor(0.01, dtype=tf.float32)
                             ),
                             dtype=tf.int32,
