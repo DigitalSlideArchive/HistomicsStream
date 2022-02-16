@@ -1,7 +1,30 @@
 [build-system]
-requires = [
-         "setuptools>=42",
-         "wheel",
-         "flit_core >=2,<4",
-         ]
-build-backend = "setuptools.build_meta"
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "histomics_stream"
+readme = "README.md"
+requires-python = ">=3.6"
+authors = [{name = "Lee A. Newberg", email = "lee.newberg@kitware.com"}]
+maintainers = [{name = "Lee A. Newberg", email = "lee.newberg@kitware.com"}]
+keywords = ["tensorflow", "whole slide image", "stream", "machine learning"]
+classifiers = ["License :: OSI Approved :: Apache Software License"]
+dependencies = [
+    # tensorflow is not listed as a dependency because the user
+    # will likely want to specify the version for compatibility
+    # with the CUDA libraries, presence of GPUs, etc.
+    "imagecodecs",
+    "itk",
+    "numpy",
+    "openslide-python",
+    "pillow",
+    "zarr",
+]
+dynamic = ["version", "description"]
+
+[project.urls]
+Source = "https://github.com/DigitalSlideArchive/histomics_stream"
+
+[project.scripts]
+flit = "flit:main"

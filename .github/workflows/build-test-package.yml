@@ -12,9 +12,8 @@ jobs:
 
         include:
           - flake8-python-git-tag: "<4.0.0"
-          - itk-python-git-tag: "==v5.2.1"
+          - itk-python-git-tag: "~=5.2.0"
           - pytest-python-git-tag: "<7.0.0"
-          - tensorflow-python-git-tag: ""
 
     steps:
       - uses: actions/checkout@v2
@@ -37,8 +36,8 @@ jobs:
           sudo apt update
           sudo apt install openslide-tools python3-openslide
           python -m pip install --upgrade pip setuptools wheel
-          pip install 'flake8${{ matrix.flake8-python-git-tag }}' 'pytest${{ matrix.pytest-python-git-tag }}' 'itk${{ matrix.itk-python-git-tag }}' 'tensorflow${{ matrix.tensorflow-python-git-tag }}'
-          pip install 'large-image[all]' --find-links https://girder.github.io/large_image_wheels
+          pip install 'flake8${{ matrix.flake8-python-git-tag }}' 'pytest${{ matrix.pytest-python-git-tag }}' 'itk${{ matrix.itk-python-git-tag }}' 'tensorflow'
+          pip install 'large-image[openslide,ometiff,openjpeg,bioformats]' 'scikit_image' --find-links https://girder.github.io/large_image_wheels
 
       - name: Install histomics_stream
         run: |
@@ -56,3 +55,29 @@ jobs:
           cd test
           pytest
         shell: bash
+
+  build-n-publish:
+    name: Build and publish Python 🐍 distributions 📦 to PyPI and TestPyPI
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@master
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v1
+      with:
+        python-version: 3.9
+    - name: Install pypa/build
+      run: >-
+        python -m pip install build --user
+    - name: Build a binary wheel and a source tarball
+      run: >-
+        python -m build --sdist --wheel --outdir dist/ .
+    - name: Publish distribution 📦 to Test PyPI
+      uses: pypa/gh-action-pypi-publish@master
+      with:
+        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        repository_url: https://test.pypi.org/legacy/
+    - name: Publish distribution 📦 to PyPI
+      if: startsWith(github.ref, 'refs/tags')
+      uses: pypa/gh-action-pypi-publish@master
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
