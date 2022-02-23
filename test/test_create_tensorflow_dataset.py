@@ -17,9 +17,12 @@
 import copy
 import histomics_stream as hs
 
-def test_histomics_stream_can_be_found():
-    """Purpose: Exercise the basic steps for creating a tensorflow Dataset"""
 
+def test_histomics_stream_can_be_found():
+    """
+    Purpose: Exercise the basic steps for creating a tensorflow
+    Dataset
+    """
 
     # Create a study and insert study-wide information
     my_study0 = {"version": "version-1"}
@@ -29,16 +32,18 @@ def test_histomics_stream_can_be_found():
 
     # Add a slide to the study, including slide-wide information with it.
     my_slide0 = my_slides["Slide_0"] = {}
-    my_slide0["filename"] = "/tf/notebooks/histomics_stream/example/TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs"
+    my_slide0[
+        "filename"
+    ] = "/tf/notebooks/histomics_stream/example/TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs"
     my_slide0["slide_name"] = "TCGA-BH-A0BZ-01Z-00-DX1"
     my_slide0["slide_group"] = "TCGA-BH-A0BZ"
     my_slide0["number_pixel_rows_for_chunk"] = 2048
     my_slide0["number_pixel_columns_for_chunk"] = 2048
 
     if False:
-        # For each slide, find the appropriate resolution given the desired_magnification and
-        # magnification_tolerance.  In this example, we use the same parameters for each slide,
-        # but this is not required generally.
+        # For each slide, find the appropriate resolution given the
+        # desired_magnification and magnification_tolerance.  In this example, we use
+        # the same parameters for each slide, but this is not required generally.
         find_resolution_for_slide = hs.configure.FindResolutionForSlide(
             my_study0, desired_magnification=20, magnification_tolerance=0.02
         )
@@ -51,8 +56,8 @@ def test_histomics_stream_can_be_found():
         my_slide0["number_pixel_rows_for_slide"] = 85047
         my_slide0["number_pixel_columns_for_slide"] = 112334
 
-    # We are going to demonstrate several approaches to choosing tiles.  Each approach will
-    # start with its own copy of the my_study0 that we have built so far.
+    # We are going to demonstrate several approaches to choosing tiles.  Each approach
+    # will start with its own copy of the my_study0 that we have built so far.
 
     # Demonstrate TilesByGridAndMask without a mask
     my_study_tiles_by_grid = copy.deepcopy(my_study0)
@@ -62,8 +67,8 @@ def test_histomics_stream_can_be_found():
         number_pixel_overlap_columns_for_tile=32,
         randomly_select=100,
     )
-    # We could apply this to a subset of the slides, but we will apply it to all slides in
-    # this example.
+    # We could apply this to a subset of the slides, but we will apply it to all slides
+    # in this example.
     for slide in my_study_tiles_by_grid["slides"].values():
         tiles_by_grid(slide)
 
@@ -78,8 +83,8 @@ def test_histomics_stream_can_be_found():
             mask_filename="/tf/notebooks/histomics_stream/example/TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913-mask.png",
             randomly_select=100,
         )
-        # We could apply this to a subset of the slides, but we will apply it to all slides in
-        # this example.
+        # We could apply this to a subset of the slides, but we will apply it to all
+        # slides in this example.
         for slide in my_study_tiles_by_grid_and_mask["slides"].values():
             tiles_by_grid_and_mask(slide)
 
@@ -90,8 +95,8 @@ def test_histomics_stream_can_be_found():
         randomly_select=5,
         tiles_dictionary=my_study_tiles_by_grid["slides"]["Slide_0"]["tiles"],
     )
-    # We could apply this to a subset of the slides, but we will apply it to all slides in
-    # this example.
+    # We could apply this to a subset of the slides, but we will apply it to all slides
+    # in this example.
     for slide in my_study_tiles_by_list["slides"].values():
         tiles_by_list(slide)
 
@@ -100,7 +105,7 @@ def test_histomics_stream_can_be_found():
     tiles_randomly = hs.configure.TilesRandomly(
         my_study_tiles_randomly, randomly_select=3
     )
-    # We could apply this to a subset of the slides, but we will apply it to all slides in
-    # this example.
+    # We could apply this to a subset of the slides, but we will apply it to all slides
+    # in this example.
     for slide in my_study_tiles_randomly["slides"].values():
         tiles_randomly(slide)

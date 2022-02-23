@@ -7,7 +7,8 @@ import re
 
 
 class FindResolutionForSlide:
-    """A class that computes read parameters for slides.
+    """
+    A class that computes read parameters for slides.
 
     An instance of class FindResolutionForSlide is a callable that
     will add level, target_magnification, scan_magnification,
@@ -22,8 +23,8 @@ class FindResolutionForSlide:
         The path of the image file to be read.
 
     target_magnification : float
-        The desired objective magnification for generated tiles.  For 
-        example, a value of 10 corresponds to about 1 micron per pixel 
+        The desired objective magnification for generated tiles.  For
+        example, a value of 10 corresponds to about 1 micron per pixel
         and a value of 20 corresponds to about 0.5 microns per pixel.
 
     magnification_source : str in ["scan", "native", "exact"]
@@ -32,15 +33,15 @@ class FindResolutionForSlide:
         magnification.
 
         "native" will produce tiles from the nearest available
-        magnification equal to or greater than target_magnification 
-        (within a 2% tolerance). The "native" option is useful when 
-        you want to handle resizing of tiles to target_magnification 
+        magnification equal to or greater than target_magnification
+        (within a 2% tolerance). The "native" option is useful when
+        you want to handle resizing of tiles to target_magnification
         on your own.
 
         "exact" will produce tiles using "native" option and then
-        resize these tiles to match target_magnification. Resizing
-        is handled by PIL using the Lanczos antialiasing filter
-        since the resizing shrinks the tile by definition.
+        resize these tiles to match target_magnification. Resizing is
+        handled by PIL using the Lanczos antialiasing filter since the
+        resizing shrinks the tile by definition.
 
         For either "scan" or "native", the size of the read and
         returned tiles will be (tile_height * returned_magnification /
@@ -49,19 +50,24 @@ class FindResolutionForSlide:
         tiles will be (tile_height, tile_width).
 
         This procedure sets values in the slide dictionary to capture
-        the scan, read, and returned magnification of the tiles. This is
-        helpful for example to resize results to the scan magnification
-        for visualization in HistomicsUI, or to resize between native
-        and target magnification when using "native". "scan_magnification" 
-        is the highest magnification from the source file; "read_magnification" 
-        is the magnification read from the source file; "returned_magnification" 
-        is the magnification of the returned tiles which is same as 
-        "read_magnification" in the case  of "scan" or "native" or 
-        "target_magnification" in the case of "exact".
+        the scan, read, and returned magnification of the tiles. This
+        is helpful for example to resize results to the scan
+        magnification for visualization in HistomicsUI, or to resize
+        between native and target magnification when using
+        "native". "scan_magnification" is the highest magnification
+        from the source file; "read_magnification" is the
+        magnification read from the source file;
+        "returned_magnification" is the magnification of the returned
+        tiles which is same as "read_magnification" in the case of
+        "scan" or "native" or "target_magnification" in the case of
+        "exact".
     """
 
     def __init__(self, study, target_magnification, magnification_source):
-        """Sanity check the supplied parameters and store them for later use."""
+        """
+        Sanity check the supplied parameters and store them for later
+        use.
+        """
         # Check values.
         if not ("version" in study and study["version"] == "version-1"):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
@@ -82,7 +88,7 @@ class FindResolutionForSlide:
             )
 
         # Save values.
-        self.target_magnification = target_magnification
+        self.target_magnification = float(target_magnification)
         self.magnification_source = magnification_source
 
     def __call__(self, slide):
@@ -106,13 +112,11 @@ class FindResolutionForSlide:
             ts = large_image.open(filename)
 
             # scan_magnification = highest available magnification from source
-            scan_magnification = np.float32(
-                ts.getNativeMagnification()["magnification"]
-            )
+            scan_magnification = float(ts.getNativeMagnification()["magnification"])
 
             if self.magnification_source == "exact":
-                # Use the tile-source level that large_image is
-                # willing to interpolate for us.
+                # Use the tile-source level that large_image is willing to interpolate
+                # for us.
                 preferred_levels = [
                     ts.getLevelForMagnification(
                         self.target_magnification, rounding=False
@@ -130,7 +134,7 @@ class FindResolutionForSlide:
 
             estimated_magnifications = np.array(
                 [
-                    ts.getMagnificationForLevel(level)["magnification"]
+                    float(ts.getMagnificationForLevel(level)["magnification"])
                     for level in preferred_levels
                 ]
             )
@@ -139,16 +143,24 @@ class FindResolutionForSlide:
             (level, returned_magnification) = self._get_level_and_magnifications(
                 self.target_magnification, estimated_magnifications
             )
-            # Rather than as the index into preferred_levels, change
-            # level to be the value that large_image uses
+            # Rather than as the index into preferred_levels, change level to be the
+            # value that large_image uses
             level = preferred_levels[level]
 
-            # If large_image is resampling a native level for us, it
-            # is starting with the preferred level that is the least
-            # one that is not smaller than the resampled level.
-            read_magnification = ts.getMagnificationForLevel(
-                min([ts.getPreferredLevel(i) for i in range(ts.levels) if i >= level])
-            )["magnification"]
+            # If large_image is resampling a native level for us, it is starting with
+            # the preferred level that is the least one that is not smaller than the
+            # resampled level.
+            read_magnification = float(
+                ts.getMagnificationForLevel(
+                    min(
+                        [
+                            ts.getPreferredLevel(i)
+                            for i in range(ts.levels)
+                            if i >= level
+                        ]
+                    )
+                )["magnification"]
+            )
 
             slide["target_magnification"] = self.target_magnification
             slide["scan_magnification"] = scan_magnification
@@ -157,12 +169,12 @@ class FindResolutionForSlide:
 
             # We don't want to walk off the right or bottom of the slide so we are
             # conservative as to how many pixels large_image will return for us.
-            # 1) large_image starts with an image that is of read_mangification; we
-            #    compute the dimensions for read_magnification with math.floor from the
-            #    dimensions of scan_magnification (i.e., ts.sizeX and ts.sizeY) to be
-            #    conservative.
+            # 1) large_image starts with an image that is of
+            #    read_magnification; we compute the dimensions for read_magnification
+            #    with math.floor from the dimensions of scan_magnification (i.e.,
+            #    ts.sizeX and ts.sizeY) to be conservative.
             # 2) large_image or external software may resampled from the
-            #    read_mangification to the target_magnification; we compute dimensions
+            #    read_magnification to the target_magnification; we compute dimensions
             #    for the target_magnification with math.floor from the
             #    read_magnification to be conservative.
             number_pixel_rows_for_slide = ts.sizeY
@@ -199,7 +211,7 @@ class FindResolutionForSlide:
             source_group = zarr.open(store, mode="r")
 
             # scan_magnification = highest available magnification from source
-            scan_magnification = np.float32(
+            scan_magnification = float(
                 source_group.attrs[os.PROPERTY_NAME_OBJECTIVE_POWER]
             )
 
@@ -217,8 +229,8 @@ class FindResolutionForSlide:
             (level, returned_magnification) = self._get_level_and_magnifications(
                 self.target_magnification, estimated_magnifications
             )
-            # Rather than as the index into preferred_levels, change
-            # level to be the value that zarr uses
+            # Rather than as the index into preferred_levels, change level to be the
+            # value that zarr uses
             level = preferred_levels[level]
 
             slide["target_magnification"] = self.target_magnification
@@ -267,7 +279,9 @@ class FindResolutionForSlide:
     def _get_level_and_magnifications(
         self, target_magnification, estimated_magnifications
     ):
-        """A private subroutine that computes level and magnifications."""
+        """
+        A private subroutine that computes level and magnifications.
+        """
         # calculate difference with magnification levels
 
         magnification_tolerance = 0.02
@@ -291,7 +305,8 @@ class FindResolutionForSlide:
 
 
 class TilesByGridAndMask:
-    """Select tiles according to a regular grid.  Optionally, restrict
+    """
+    Select tiles according to a regular grid.  Optionally, restrict
     the list by a mask that is read from a file.  Optionally, further
     select a random subset of them.
 
@@ -302,7 +317,8 @@ class TilesByGridAndMask:
     Parameters for the constructor
     ------------------------------
     study : dictionary
-        The study dictionary from which to read parameters about the study.
+        The study dictionary from which to read parameters about the
+        study.
     randomly_select: int
         The number of tiles to be randomly selected from the list that
         would otherwise be written to the slide dictionary.  A value
@@ -336,12 +352,15 @@ class TilesByGridAndMask:
         self,
         study,
         randomly_select=-1,  # Defaults to select all
-        number_pixel_overlap_rows_for_tile=0,  # Defaults to no overlap between adjacent tiles
+        number_pixel_overlap_rows_for_tile=0,  # Defaults to no overlap
         number_pixel_overlap_columns_for_tile=0,
         mask_filename="",  # Defaults to no masking
         mask_threshold=0.0,  # Defaults to any overlap with the mask
     ):
-        """Sanity check the supplied parameters and store them for later use."""
+        """
+        Sanity check the supplied parameters and store them for later
+        use.
+        """
         # Check values.
         if not ("version" in study and study["version"] == "version-1"):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
@@ -416,8 +435,10 @@ class TilesByGridAndMask:
         self.mask_threshold = mask_threshold
 
     def __call__(self, slide):
-        """Select tiles according to a regular grid.  Optionally, restrict the list by a mask.
-        Optionally, select a random subset of them.
+        """
+        Select tiles according to a regular grid.  Optionally,
+        restrict the list by a mask.  Optionally, select a random
+        subset of them.
         """
         # Check values.
         if "number_pixel_rows_for_slide" not in slide:
@@ -561,20 +582,20 @@ class TilesByGridAndMask:
         bottom = top + self.number_pixel_rows_for_tile
         right = left + self.number_pixel_columns_for_tile
         mask_top = (
-            top / self.number_pixel_rows_for_slide * self.number_pixel_rows_for_mask
+            top * self.number_pixel_rows_for_mask / self.number_pixel_rows_for_slide
         )
         mask_bottom = (
-            bottom / self.number_pixel_rows_for_slide * self.number_pixel_rows_for_mask
+            bottom * self.number_pixel_rows_for_mask / self.number_pixel_rows_for_slide
         )
         mask_left = (
             left
-            / self.number_pixel_columns_for_slide
             * self.number_pixel_columns_for_mask
+            / self.number_pixel_columns_for_slide
         )
         mask_right = (
             right
-            / self.number_pixel_columns_for_slide
             * self.number_pixel_columns_for_mask
+            / self.number_pixel_columns_for_slide
         )
         cumulative_top_left = self.interpolate_cumulative(mask_top, mask_left)
         cumulative_top_right = self.interpolate_cumulative(mask_top, mask_right)
@@ -598,7 +619,8 @@ class TilesByGridAndMask:
 
 
 class TilesByList:
-    """Select the tiles supplied by the user.  Optionally, select a
+    """
+    Select the tiles supplied by the user.  Optionally, select a
     random subset of them.
 
     An instance of class TilesByList is a callable that will select
@@ -608,7 +630,8 @@ class TilesByList:
     Parameters for the constructor
     ------------------------------
     study : dictionary
-        The study dictionary from which to read parameters about the study.
+        The study dictionary from which to read parameters about the
+        study.
     randomly_select: int
         The number of tiles to be randomly selected from the list that
         would otherwise be written to the slide dictionary.  A value
@@ -628,7 +651,10 @@ class TilesByList:
         randomly_select=-1,  # Defaults to select all
         tiles_dictionary={},  # {'AB234': {'tile_top': top0, 'tile_left': left0}, 'CD43': {'tile_top': top1, 'tile_left': left1}, ...}
     ):
-        """Sanity check the supplied parameters and store them for later use."""
+        """
+        Sanity check the supplied parameters and store them for later
+        use.
+        """
         # Check values
         if not ("version" in study and study["version"] == "version-1"):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
@@ -701,7 +727,10 @@ class TilesByList:
         )  # in case user changes it later
 
     def __call__(self, slide):
-        """Select the tiles supplied by the user.  Optionally, select a random subset of them."""
+        """
+        Select the tiles supplied by the user.  Optionally, select a
+        random subset of them.
+        """
         tiles = slide["tiles"] = copy.deepcopy(
             self.tiles_dictionary
         )  # in case __call__ is called again.
@@ -715,7 +744,8 @@ class TilesByList:
 
 
 class TilesRandomly:
-    """Select a random subset of all possible tiles.
+    """
+    Select a random subset of all possible tiles.
 
     An instance of class TilesRandomly is a callable that will select
     the coordinates of tiles to be taken from a slide.  The selected
@@ -724,7 +754,8 @@ class TilesRandomly:
     Parameters for the constructor
     ------------------------------
     study : dictionary
-        The study dictionary from which to read parameters about the study.
+        The study dictionary from which to read parameters about the
+        study.
     randomly_select: int
         The number of tiles to be randomly selected from the slide.
         The value must be positive.  A value of 1 is the default.
@@ -732,7 +763,10 @@ class TilesRandomly:
     """
 
     def __init__(self, study, randomly_select=1):  # Defaults to select one
-        """Sanity check the supplied parameters and store them for later use."""
+        """
+        Sanity check the supplied parameters and store them for later
+        use.
+        """
         # Check values.
         if not ("version" in study and study["version"] == "version-1"):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
@@ -766,7 +800,9 @@ class TilesRandomly:
         self.randomly_select = randomly_select
 
     def __call__(self, slide):
-        """Select a random subset of all possible tiles."""
+        """
+        Select a random subset of all possible tiles.
+        """
         if "number_pixel_rows_for_slide" not in slide:
             raise ValueError(
                 'slide["number_pixel_rows_for_slide"] must be already set.'
