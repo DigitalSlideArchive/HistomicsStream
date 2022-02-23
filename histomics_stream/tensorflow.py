@@ -12,7 +12,10 @@ class CreateTensorFlowDataset:
         }
 
     def __call__(self, study_description):
-        """From scratch, creates a tensorflow dataset with one tensorflow element per tile"""
+        """
+        From scratch, creates a tensorflow dataset with one tensorflow
+        element per tile
+        """
 
         if not (
             "version" in study_description
@@ -39,6 +42,16 @@ class CreateTensorFlowDataset:
                 'study_description["number_pixel_columns_for_tile"]'
                 " must exist and be a positive integer"
             )
+        for slide in study_description["slides"].values():
+            if not (
+                "returned_magnification" in slide
+                and isinstance(slide["returned_magnification"], (int, float))
+                and slide["returned_magnification"] > 0
+            ):
+                raise ValueError(
+                    'slide["returned_magnification"]'
+                    " must exist and be a positive number"
+                )
         # Check that other necessary keys are also present!!!
 
         # Partition the set of tiles into chunks.
@@ -168,9 +181,8 @@ class CreateTensorFlowDataset:
                 }
                 number_of_chunks += 1
 
-                # This implementation has a run time that is quadratic
-                # in the number of tiles that a slide has.  It is too
-                # slow; we should make it faster.
+                # This implementation has a run time that is quadratic in the number of
+                # tiles that a slide has.  It is too slow; we should make it faster.
                 tiles = chunk["tiles"] = {}
                 subsequent_chunks = []
                 for tile in tiles_as_sorted_list:
@@ -208,11 +220,10 @@ class CreateTensorFlowDataset:
 
     @tf.function
     def _read_and_split_chunk_pixels(self, elem):
-        # Get chunk's pixel data from disk and load it into
-        # chunk_pixels_as_tensor.  Note that if elem["factor"] differs
-        # from 1.0 then this chunk will have number_of_rows
-        # ((chunk_bottom - chunk_top) / factor, and number_of_columns
-        # = ((chunk_right - chunk_left) / factor.
+        # Get chunk's pixel data from disk and load it into chunk_pixels_as_tensor.
+        # Note that if elem["factor"] differs from 1.0 then this chunk will have
+        # number_of_rows ((chunk_bottom - chunk_top) / factor, and number_of_columns =
+        # ((chunk_right - chunk_left) / factor.
         factor = tf.cast(elem["target_magnification"], dtype=tf.float32) / tf.cast(
             elem["returned_magnification"], dtype=tf.float32
         )
@@ -224,7 +235,7 @@ class CreateTensorFlowDataset:
                 elem["chunk_bottom"],
                 elem["chunk_right"],
                 elem["filename"],
-                elem["level"],
+                elem["returned_magnification"],
                 factor,
             ],
             Tout=tf.uint8,
@@ -317,23 +328,33 @@ class CreateTensorFlowDataset:
         return response
 
     def _py_read_chunk_pixels(
-        self, chunk_top, chunk_left, chunk_bottom, chunk_right, filename, level, factor
+        self,
+        chunk_top,
+        chunk_left,
+        chunk_bottom,
+        chunk_right,
+        filename,
+        returned_magnification,
+        factor,
     ):
-        """Read from disk all the pixel data for a specific chunk of the whole slide."""
+        """
+        Read from disk all the pixel data for a specific chunk of the
+        whole slide.
+        """
 
         filename = filename.numpy().decode("utf-8")
         chunk_top = math.floor(chunk_top.numpy() / factor.numpy() + 0.01)
         chunk_left = math.floor(chunk_left.numpy() / factor.numpy() + 0.01)
         chunk_bottom = math.floor(chunk_bottom.numpy() / factor.numpy() + 0.01)
         chunk_right = math.floor(chunk_right.numpy() / factor.numpy() + 0.01)
-        level = level.numpy()
+        returned_magnification = returned_magnification.numpy()
 
         if re.compile(r"\.svs$").search(filename):
             import large_image
 
             ts = large_image.open(filename)
             chunk = ts.getRegion(
-                scale=dict(level=level),
+                scale=dict(magnification=returned_magnification),
                 format=large_image.constants.TILE_FORMAT_NUMPY,
                 region=dict(
                     left=chunk_left,
@@ -343,17 +364,6 @@ class CreateTensorFlowDataset:
                     units="mag_pixels",
                 ),
             )[0]
-        elif re.compile(r"\.svs$").search(filename):
-            import openslide as os
-
-            os_obj = os.OpenSlide(filename)
-            chunk = np.array(
-                os_obj.read_region(
-                    (chunk_left, chunk_top),
-                    level,
-                    (chunk_right - chunk_left, chunk_bottom - chunk_top),
-                )
-            )
         else:
             from PIL import Image
 
