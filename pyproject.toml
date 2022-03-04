@@ -24,7 +24,7 @@ dependencies = [
 dynamic = ["version", "description"]
 
 [project.urls]
-Source = "https://github.com/DigitalSlideArchive/histomics_stream"
+Source = "https://github.com/DigitalSlideArchive/HistomicsStream"
 
 [project.scripts]
 flit = "flit:main"
