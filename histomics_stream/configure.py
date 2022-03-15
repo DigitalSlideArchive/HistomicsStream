@@ -105,7 +105,7 @@ class FindResolutionForSlide:
         filename = slide["filename"]
 
         # Do the work.
-        if re.compile(r"\.svs$").search(filename):
+        if not re.compile(r"\.zarr$").search(filename):
             import large_image
 
             # read whole-slide image file and create large_image object
@@ -202,7 +202,7 @@ class FindResolutionForSlide:
                     / read_magnification
                 )
 
-        elif re.compile(r"\.zarr$").search(filename):
+        else:
             import zarr
             import openslide as os
 
@@ -252,21 +252,6 @@ class FindResolutionForSlide:
                 raise ValueError(
                     f"Couldn't find magnification {self.target_magnification}X in Zarr storage."
                 )
-
-        else:
-            from PIL import Image
-
-            # We don't know magnifications so assume reasonable values
-            level = 0
-            slide["target_magnification"] = self.target_magnification
-            slide["scan_magnification"] = None
-            slide["read_magnification"] = None
-            slide["returned_magnification"] = None
-
-            pil_obj = Image.open(filename)
-            #  (Note that number_pixel_columns_for_slide is before
-            #  number_pixel_rows_for_slide)
-            number_pixel_columns_for_slide, number_pixel_rows_for_slide = pil_obj.size
 
         slide["level"] = level
         # Note that slide size is defined by the requested magnification, which may not

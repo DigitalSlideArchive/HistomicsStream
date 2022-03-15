@@ -349,28 +349,20 @@ class CreateTensorFlowDataset:
         chunk_right = math.floor(chunk_right.numpy() / factor.numpy() + 0.01)
         returned_magnification = returned_magnification.numpy()
 
-        if re.compile(r"\.svs$").search(filename):
-            import large_image
+        import large_image
 
-            ts = large_image.open(filename)
-            chunk = ts.getRegion(
-                scale=dict(magnification=returned_magnification),
-                format=large_image.constants.TILE_FORMAT_NUMPY,
-                region=dict(
-                    left=chunk_left,
-                    top=chunk_top,
-                    width=chunk_right - chunk_left,
-                    height=chunk_bottom - chunk_top,
-                    units="mag_pixels",
-                ),
-            )[0]
-        else:
-            from PIL import Image
-
-            pil_obj = Image.open(filename)
-            chunk = np.asarray(pil_obj)[
-                chunk_left:chunk_right, chunk_top:chunk_bottom, :
-            ]
+        ts = large_image.open(filename)
+        chunk = ts.getRegion(
+            scale=dict(magnification=returned_magnification),
+            format=large_image.constants.TILE_FORMAT_NUMPY,
+            region=dict(
+                left=chunk_left,
+                top=chunk_top,
+                width=chunk_right - chunk_left,
+                height=chunk_bottom - chunk_top,
+                units="mag_pixels",
+            ),
+        )[0]
 
         # Do we want to support other than RGB and/or other than uint8?!!!
         return tf.convert_to_tensor(chunk[..., :3], dtype=tf.uint8)
