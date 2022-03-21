@@ -17,8 +17,6 @@ dependencies = [
     "imagecodecs",
     "itk",
     "numpy",
-    "openslide-python",
-    "pillow",
     "zarr",
 ]
 dynamic = ["version", "description"]
