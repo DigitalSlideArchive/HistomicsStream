@@ -1,6 +1,6 @@
-# histomics_stream
+# HistomicsStream
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/InsightSoftwareConsortium/ITK/blob/master/LICENSE) [![PyPI Version](https://img.shields.io/pypi/v/histomics_stream.svg)](https://pypi.python.org/pypi/histomics_stream) [![GitHub repository](https://img.shields.io/badge/Powered%20by-histomics__stream-blue.svg)](https://github.com/DigitalSlideArchive/HistomicsStream) [![Google Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/DigitalSlideArchive/HistomicsStream/blob/master/example/tensorflow_stream.ipynb)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/InsightSoftwareConsortium/ITK/blob/master/LICENSE) [![PyPI Version](https://img.shields.io/pypi/v/histomics_stream.svg)](https://pypi.python.org/pypi/histomics_stream) [![GitHub repository](https://img.shields.io/badge/Powered%20by-HistomicsStream-blue.svg)](https://github.com/DigitalSlideArchive/HistomicsStream) [![Google Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/DigitalSlideArchive/HistomicsStream/blob/master/example/tensorflow_stream.ipynb)
 
 ## Overview
 
@@ -13,9 +13,10 @@ The goal of this project is to create a whole-slide image file reader for machin
 ```shell-script
 sudo apt update
 sudo apt install -y python3-openslide openslide-tools
-pip install histomics_stream 'large_image[openslide,ometiff,openjpeg,bioformats]' \
+pip install histomics_stream 'large_image[openslide]' \
   scikit_image --find-links https://girder.github.io/large_image_wheels
 ```
+Note that additional image readers can be supported by using, e.g., `large_image[openslide,ometiff,openjpeg,bioformats]` instead of `large_image[openslide]`.
 
 After launching `python3`, import the `histomics_stream` package with:
 
@@ -28,6 +29,10 @@ This has been tested with `tensorflow:2.6.2-gpu` and `tensorflow:2.8.0-gpu`.
 ## History
 
 Through version 1.0.6, this project was known as `tensorflow_reader`.
+
+## Study representation
+
+`histomics_stream` works in two steps. It first builds an object that represents the study.  Second, from that study object, it builds a `tensorflow` `Dataset` object, which efficiently reads the pixel data from files.  The study object is described in [StudyObject.md](StudyObject.md).
 
 ## Introduction
 
