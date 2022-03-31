@@ -60,6 +60,8 @@ Those keys that are fixed strings are in bold.  The keys whose values are set di
           The index of the leftmost column of the tile, where 0 is the leftmost column of the slide, measured in pixels using the `target_magnification` (described above).
     + **chunks** (Python dict):
       Contains information about the slide's read chunks.  The keys of this Python dict are set by `histomics_stream` for its own convenience, one per chunk.
+      + key for chunk (Python dict):
+        Contains information about this chunk.  The keys and values for this Python dict are:
         + **chunk_top** (int):
           The index of the top row of the chunk, where 0 is the top row of the slide, measured in pixels using the `target_magnification` (described above).
         + **chunk_left** (int):
