@@ -11,12 +11,10 @@ maintainers = [{name = "Lee A. Newberg", email = "lee.newberg@kitware.com"}]
 keywords = ["tensorflow", "whole slide image", "stream", "machine learning"]
 classifiers = ["License :: OSI Approved :: Apache Software License"]
 dependencies = [
-    # tensorflow is not listed as a dependency because the user
-    # will likely want to specify the version for compatibility
-    # with the CUDA libraries, presence of GPUs, etc.
     "imagecodecs",
     "itk",
     "numpy",
+    "tensorflow",
     "zarr",
 ]
 dynamic = ["version", "description"]
