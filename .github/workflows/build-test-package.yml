@@ -41,7 +41,7 @@ jobs:
 
       - name: Install histomics_stream
         run: |
-          pip install --use-feature=in-tree-build .
+          pip install .
 
       - name: Lint with flake8
         run: |
