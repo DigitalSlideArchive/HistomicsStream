@@ -3,8 +3,9 @@ import numpy as np
 import re
 import tensorflow as tf
 
+from . import configure
 
-class CreateTensorFlowDataset:
+class CreateTensorFlowDataset(configure.ChunkLocations):
     def __init__(self):
         self.dataset_map_options = {
             "num_parallel_calls": tf.data.experimental.AUTOTUNE,
@@ -17,47 +18,8 @@ class CreateTensorFlowDataset:
         element per tile
         """
 
-        if not (
-            "version" in study_description
-            and study_description["version"] == "version-1"
-        ):
-            raise ValueError(
-                'study_description["version"] must exist and be equal to "version-1".'
-            )
-        if not (
-            "number_pixel_rows_for_tile" in study_description
-            and isinstance(study_description["number_pixel_rows_for_tile"], int)
-            and study_description["number_pixel_rows_for_tile"] > 0
-        ):
-            raise ValueError(
-                'study_description["number_pixel_rows_for_tile"]'
-                " must exist and be a positive integer"
-            )
-        if not (
-            "number_pixel_columns_for_tile" in study_description
-            and isinstance(study_description["number_pixel_columns_for_tile"], int)
-            and study_description["number_pixel_columns_for_tile"] > 0
-        ):
-            raise ValueError(
-                'study_description["number_pixel_columns_for_tile"]'
-                " must exist and be a positive integer"
-            )
-        for slide in study_description["slides"].values():
-            if not (
-                "returned_magnification" in slide
-                and isinstance(slide["returned_magnification"], (int, float))
-                and slide["returned_magnification"] > 0
-            ):
-                raise ValueError(
-                    'slide["returned_magnification"]'
-                    " must exist and be a positive number"
-                )
-        # Check that other necessary keys are also present!!!
-
-        # Partition the set of tiles into chunks.
-        self._designate_chunks_for_tiles(study_description)
-        # cProfile.runctx("self._designate_chunks_for_tiles(study_description)", globals=globals(), locals=locals(), sort="cumulative")
-        # print("_designate_chunks_for_tiles done")
+        # Call to superclass to find the locations for the chunks
+        configure.ChunkLocations.__call__(self, study_description)
 
         # Start converting our description into tensors.
         study_as_tensors = {
@@ -132,91 +94,6 @@ class CreateTensorFlowDataset:
         # print("pop done")
 
         return study_dataset
-
-    def _designate_chunks_for_tiles(self, study_description):
-        number_pixel_rows_for_tile = study_description["number_pixel_rows_for_tile"]
-        number_pixel_columns_for_tile = study_description[
-            "number_pixel_columns_for_tile"
-        ]
-
-        for slide in study_description["slides"].values():
-            if not (
-                "number_pixel_rows_for_chunk" in slide
-                and isinstance(slide["number_pixel_rows_for_chunk"], int)
-                and slide["number_pixel_rows_for_chunk"] > 0
-            ):
-                raise ValueError(
-                    'slide["number_pixel_rows_for_chunk"]'
-                    " must exist and be a positive integer"
-                )
-            if not (
-                "number_pixel_columns_for_chunk" in slide
-                and isinstance(slide["number_pixel_columns_for_chunk"], int)
-                and slide["number_pixel_columns_for_chunk"] > 0
-            ):
-                raise ValueError(
-                    'slide["number_pixel_columns_for_chunk"]'
-                    " must exist and be a positive integer"
-                )
-            number_pixel_rows_for_chunk = slide["number_pixel_rows_for_chunk"]
-            number_pixel_columns_for_chunk = slide["number_pixel_columns_for_chunk"]
-
-            tiles_as_sorted_list = list(slide["tiles"].items())
-            tiles_as_sorted_list.sort(
-                key=lambda x: x[1]["tile_left"]
-            )  # second priority key
-            tiles_as_sorted_list.sort(
-                key=lambda x: x[1]["tile_top"]
-            )  # first priority key
-            chunks = slide["chunks"] = {}
-            number_of_chunks = 0
-            while len(tiles_as_sorted_list) > 0:
-                tile = tiles_as_sorted_list[0]
-                chunk = chunks[f"chunk_{number_of_chunks}"] = {
-                    "chunk_top": tile[1]["tile_top"],
-                    "chunk_left": tile[1]["tile_left"],
-                    "chunk_bottom": tile[1]["tile_top"] + number_pixel_rows_for_chunk,
-                    "chunk_right": tile[1]["tile_left"]
-                    + number_pixel_columns_for_chunk,
-                }
-                number_of_chunks += 1
-
-                # This implementation has a run time that is quadratic in the number of
-                # tiles that a slide has.  It is too slow; we should make it faster.
-                tiles = chunk["tiles"] = {}
-                subsequent_chunks = []
-                for tile in tiles_as_sorted_list:
-                    if (
-                        tile[1]["tile_top"] + number_pixel_rows_for_tile
-                        <= chunk["chunk_bottom"]
-                        and tile[1]["tile_left"] + number_pixel_columns_for_tile
-                        <= chunk["chunk_right"]
-                        and tile[1]["tile_left"] >= chunk["chunk_left"]
-                        and tile[1]["tile_top"] >= chunk["chunk_top"]
-                    ):
-                        tiles[tile[0]] = tile[1]
-                    else:
-                        subsequent_chunks.append(tile)
-
-                # Update the list of tiles that are not yet in chunks
-                tiles_as_sorted_list = subsequent_chunks
-
-                # Make the chunk as small as possible given the tiles that it must
-                # support.  Note that this also ensures that the pixels that are read do
-                # not run over the bottom or right border of the slide (assuming that
-                # the tiles do not go over those borders).
-                chunk["chunk_top"] = min([tile["tile_top"] for tile in tiles.values()])
-                chunk["chunk_left"] = min(
-                    [tile["tile_left"] for tile in tiles.values()]
-                )
-                chunk["chunk_bottom"] = (
-                    max([tile["tile_top"] for tile in tiles.values()])
-                    + number_pixel_rows_for_tile
-                )
-                chunk["chunk_right"] = (
-                    max([tile["tile_left"] for tile in tiles.values()])
-                    + number_pixel_columns_for_tile
-                )
 
     @tf.function
     def _read_and_split_chunk_pixels(self, elem):
