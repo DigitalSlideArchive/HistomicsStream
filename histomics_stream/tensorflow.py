@@ -1,3 +1,5 @@
+"""Whole-slide image streamer for machine learning frameworks."""
+
 import math
 import numpy as np
 import re

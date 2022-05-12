@@ -1,3 +1,5 @@
+"""Whole-slide image streamer for machine learning frameworks."""
+
 import copy
 import itk
 import math
@@ -818,8 +820,8 @@ class TilesRandomly:
 class ChunkLocations:
     def __call__(self, study_description):
         """
-        From scratch, creates a tensorflow dataset with one tensorflow
-        element per tile
+        Given the list of desired tile locations, computes the locations of chunks to be
+        read
         """
 
         print("Calling new code: ChunkLocations.__call__")
