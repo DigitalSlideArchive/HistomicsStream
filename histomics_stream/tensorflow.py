@@ -1,3 +1,21 @@
+# =========================================================================
+#
+#   Copyright NumFOCUS
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#          https://www.apache.org/licenses/LICENSE-2.0.txt
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+#
+# =========================================================================
+
 """Whole-slide image streamer for machine learning frameworks."""
 
 import math
@@ -6,6 +24,7 @@ import re
 import tensorflow as tf
 
 from . import configure
+
 
 class CreateTensorFlowDataset(configure.ChunkLocations):
     def __init__(self):
@@ -16,8 +35,7 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
 
     def __call__(self, study_description):
         """
-        From scratch, creates a tensorflow dataset with one tensorflow
-        element per tile
+        From scratch, creates a tensorflow dataset with one tensorflow element per tile
         """
 
         # Call to superclass to find the locations for the chunks
@@ -228,20 +246,15 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
         chunk_right = math.floor(chunk_right.numpy() / factor.numpy() + 0.01)
         returned_magnification = returned_magnification.numpy()
 
-        import large_image
-
-        ts = large_image.open(filename)
-        chunk = ts.getRegion(
-            scale=dict(magnification=returned_magnification),
-            format=large_image.constants.TILE_FORMAT_NUMPY,
-            region=dict(
-                left=chunk_left,
-                top=chunk_top,
-                width=chunk_right - chunk_left,
-                height=chunk_bottom - chunk_top,
-                units="mag_pixels",
-            ),
-        )[0]
+        # Call to the superclass to get the pixel data for this chunk
+        chunk = self.read_large_image(
+            filename,
+            chunk_top,
+            chunk_left,
+            chunk_bottom,
+            chunk_right,
+            returned_magnification,
+        )
 
         # Do we want to support other than RGB and/or other than uint8?!!!
         return tf.convert_to_tensor(chunk[..., :3], dtype=tf.uint8)

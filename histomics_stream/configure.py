@@ -1,3 +1,21 @@
+# =========================================================================
+#
+#   Copyright NumFOCUS
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#          https://www.apache.org/licenses/LICENSE-2.0.txt
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+#
+# =========================================================================
+
 """Whole-slide image streamer for machine learning frameworks."""
 
 import copy
@@ -817,14 +835,13 @@ class TilesRandomly:
             tiles[f"tile_{number_of_tiles}"] = {"tile_top": row, "tile_left": column}
             number_of_tiles += 1
 
+
 class ChunkLocations:
     def __call__(self, study_description):
         """
         Given the list of desired tile locations, computes the locations of chunks to be
         read
         """
-
-        print("Calling new code: ChunkLocations.__call__")
 
         if not (
             "version" in study_description
@@ -952,3 +969,28 @@ class ChunkLocations:
                     max([tile["tile_left"] for tile in tiles.values()])
                     + number_pixel_columns_for_tile
                 )
+
+    def read_large_image(
+        self,
+        filename,
+        chunk_top,
+        chunk_left,
+        chunk_bottom,
+        chunk_right,
+        returned_magnification,
+    ):
+        import large_image
+
+        ts = large_image.open(filename)
+        chunk = ts.getRegion(
+            scale=dict(magnification=returned_magnification),
+            format=large_image.constants.TILE_FORMAT_NUMPY,
+            region=dict(
+                left=chunk_left,
+                top=chunk_top,
+                width=chunk_right - chunk_left,
+                height=chunk_bottom - chunk_top,
+                units="mag_pixels",
+            ),
+        )[0]
+        return chunk
