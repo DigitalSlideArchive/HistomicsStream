@@ -281,9 +281,8 @@ class FindResolutionForSlide:
         slide["number_pixel_rows_for_slide"] = number_pixel_rows_for_slide
         slide["number_pixel_columns_for_slide"] = number_pixel_columns_for_slide
 
-    def _get_level_and_magnifications(
-        self, target_magnification, estimated_magnifications
-    ):
+    @staticmethod
+    def _get_level_and_magnifications(target_magnification, estimated_magnifications):
         """
         A private subroutine that computes level and magnifications.
         """
@@ -970,8 +969,8 @@ class ChunkLocations:
                     + number_pixel_columns_for_tile
                 )
 
+    @staticmethod
     def read_large_image(
-        self,
         filename,
         chunk_top,
         chunk_left,
@@ -994,3 +993,7 @@ class ChunkLocations:
             ),
         )[0]
         return chunk
+
+    @staticmethod
+    def scale_it(value, factor):
+        return math.floor(value / factor + 0.01)

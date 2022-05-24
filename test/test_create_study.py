@@ -18,15 +18,15 @@
 #
 # =========================================================================
 
-import copy
-import histomics_stream as hs
 
-
-def test_histomics_stream_can_be_found():
+def test_create_study():
     """
-    Purpose: Exercise the basic steps for creating a tensorflow
-    Dataset
+    Purpose: Exercise the basic steps for creating a study dict, which is the precursor
+    step to creating a dataset/dataloader for a machine learning framework such as
+    TensorFlow or Torch.
     """
+    import copy
+    import histomics_stream as hs
 
     # Create a study and insert study-wide information
     my_study0 = {"version": "version-1"}
@@ -113,3 +113,10 @@ def test_histomics_stream_can_be_found():
     # in this example.
     for slide in my_study_tiles_randomly["slides"].values():
         tiles_randomly(slide)
+
+    # The next step would be creating a dataset/dataloader for a machine learning
+    # framework such as TensorFlow or Torch.  However, we will not do that in this test.
+
+
+if __name__ == "__main__":
+    test_create_study()

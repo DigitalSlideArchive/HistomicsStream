@@ -42,26 +42,139 @@ import torch
 from . import configure
 
 
-class MyDataset(torch.utils.data.Dataset):
+class CreateTorchDataloader(configure.ChunkLocations):
+    class MyDataset(torch.utils.data.IterableDataset):
+        def __init__(self, study_description):
+            """Store in self the data or pointers to it"""
+            self.study_description = study_description
+
+        def __iter__(self):
+            """Return an iterable that yields tiles=(pixel data, annotation_dict)"""
+
+            def my_iterable():
+                """This is the iterable that we will return"""
+                study_description = self.study_description
+                study_dict = {
+                    # !!! Is it better to have the dictionary values be length-one
+                    # !!! lists, here and below?
+                    # !!! Or use
+                    # !!! {key: torch.from_numpy(np.array(study_description[key]))}?
+                    key: study_description[key]
+                    for key in study_description.keys()
+                    if key != "slides"
+                }
+                for slide_description in study_description["slides"].values():
+                    slide_dict = {
+                        **study_dict,
+                        **{
+                            key: slide_description[key]
+                            for key in slide_description.keys()
+                            if key not in ["tiles", "chunks"]
+                        },
+                    }
+
+                    filename = slide_dict["filename"]
+                    returned_magnification = slide_dict["returned_magnification"]
+                    factor = slide_dict["target_magnification"] / returned_magnification
+                    scaled_number_pixel_rows_for_tile = (
+                        configure.ChunkLocations.scale_it(
+                            slide_dict["number_pixel_rows_for_tile"], factor
+                        )
+                    )
+                    scaled_number_pixel_columns_for_tile = (
+                        configure.ChunkLocations.scale_it(
+                            slide_dict["number_pixel_columns_for_tile"], factor
+                        )
+                    )
+
+                    for chunk_description in slide_description["chunks"].values():
+                        chunk_dict = {
+                            **slide_dict,
+                            **{
+                                key: chunk_description[key]
+                                for key in chunk_description.keys()
+                                if key != "tiles"
+                            },
+                        }
+
+                        # Call to the superclass to get the pixel data for this chunk.
+                        # Keep only first 3 colors.  Convert to np.uint8.
+                        scaled_chunk_top = configure.ChunkLocations.scale_it(
+                            chunk_dict["chunk_top"], factor
+                        )
+                        scaled_chunk_left = configure.ChunkLocations.scale_it(
+                            chunk_dict["chunk_left"], factor
+                        )
+                        scaled_chunk_bottom = configure.ChunkLocations.scale_it(
+                            chunk_dict["chunk_bottom"], factor
+                        )
+                        scaled_chunk_right = configure.ChunkLocations.scale_it(
+                            chunk_dict["chunk_right"], factor
+                        )
+
+                        scaled_chunk_pixels = torch.from_numpy(
+                            configure.ChunkLocations.read_large_image(
+                                filename,
+                                scaled_chunk_top,
+                                scaled_chunk_left,
+                                scaled_chunk_bottom,
+                                scaled_chunk_right,
+                                returned_magnification,
+                            )[..., :3].astype(dtype=np.uint8)
+                        )
+
+                        for tile_description in chunk_description["tiles"].values():
+                            tile_dict = {
+                                **chunk_dict,
+                                **{
+                                    key: tile_description[key]
+                                    for key in tile_description.keys()
+                                },
+                            }
+                            scaled_tile_top = (
+                                configure.ChunkLocations.scale_it(
+                                    tile_dict["tile_top"], factor
+                                )
+                                - scaled_chunk_top
+                            )
+                            scaled_tile_left = (
+                                configure.ChunkLocations.scale_it(
+                                    tile_dict["tile_left"], factor
+                                )
+                                - scaled_chunk_left
+                            )
+                            scaled_tile_bottom = (
+                                scaled_tile_top + scaled_number_pixel_rows_for_tile
+                            )
+                            scaled_tile_right = (
+                                scaled_tile_left + scaled_number_pixel_columns_for_tile
+                            )
+                            scaled_tile_pixels = scaled_chunk_pixels[
+                                scaled_tile_top:scaled_tile_bottom,
+                                scaled_tile_left:scaled_tile_right,
+                                :,
+                            ]
+                            yield (scaled_tile_pixels, tile_dict)
+
+            """Return an iterable over the tiles"""
+            return my_iterable()
+
     def __init__(self):
-        """Store in self the data or pointers to it"""
-        pass                    # Write me!!!
-
-    def __getitem__(self, index):
-        """Return x, y, which is an (input, label) tuple"""
-        pass                    # Write me!!!
-
-    def __len__(self):
-        """Return the total number of data items that will be available"""
-        pass                    # Write me!!!
-
-
-class CreateTorchDataset(configure.ChunkLocations):
-    def __init__(self):
-        pass  # Write me!!!
+        """Set global options"""
+        # !!! Instead, get `batch_size` from somewhere
+        self.batch_size = 1
 
     def __call__(self, study_description):
         """
-        From scratch, creates a torch dataset with one torch element per tile
+        From scratch, creates a torch dataloader with one torch element per tile
         """
-        pass  # Write me!!!
+        # Call to superclass to find the locations for the chunks
+        configure.ChunkLocations.__call__(self, study_description)
+
+        my_dataset = self.MyDataset(study_description)
+        # !!! DataLoader has additional parameters that we may wish to use
+        my_data_loader = torch.utils.data.DataLoader(
+            my_dataset, batch_size=self.batch_size
+        )
+
+        return my_data_loader

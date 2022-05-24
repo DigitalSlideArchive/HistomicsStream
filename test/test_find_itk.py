@@ -24,3 +24,7 @@ def test_itk_can_be_found():
 
     # Import succeeds
     import itk
+
+
+if __name__ == "__main__":
+    test_itk_can_be_found()
