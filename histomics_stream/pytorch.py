@@ -112,16 +112,20 @@ class CreateTorchDataloader(configure.ChunkLocations):
                             chunk_dict["chunk_right"], factor
                         )
 
-                        scaled_chunk_pixels = torch.from_numpy(
-                            configure.ChunkLocations.read_large_image(
+                        # Use `:3` to change RGBA (if applicable) to RGB.
+                        scaled_chunk_pixels = configure.ChunkLocations.read_large_image(
                                 filename,
                                 scaled_chunk_top,
                                 scaled_chunk_left,
                                 scaled_chunk_bottom,
                                 scaled_chunk_right,
                                 returned_magnification,
-                            )[..., :3].astype(dtype=np.uint8)
-                        )
+                            )[..., :3].astype(dtype=np.float32)
+                        # Color is the last/fastest dimension for images read with
+                        # large_image, but channel is the first/slowest for Torch
+                        # tensors.
+                        scaled_chunk_pixels = np.moveaxis(scaled_chunk_pixels, -1, 0)
+                        scaled_chunk_pixels = torch.from_numpy(scaled_chunk_pixels)
 
                         for tile_description in chunk_description["tiles"].values():
                             tile_dict = {
@@ -149,14 +153,20 @@ class CreateTorchDataloader(configure.ChunkLocations):
                             scaled_tile_right = (
                                 scaled_tile_left + scaled_number_pixel_columns_for_tile
                             )
-                            scaled_tile_pixels = scaled_chunk_pixels[
-                                scaled_tile_top:scaled_tile_bottom,
-                                scaled_tile_left:scaled_tile_right,
-                                :,
-                            ]
-                            yield (scaled_tile_pixels, tile_dict)
+                            scaled_tile_pixels = scaled_chunk_pixels[:, scaled_tile_top:scaled_tile_bottom, scaled_tile_left:scaled_tile_right]
 
-            """Return an iterable over the tiles"""
+                            # Yield the pixel data as a tensor and the Python dict of
+                            # associated information
+                            yield scaled_tile_pixels, tile_dict
+
+                            # Clean up memory-intensive variables that were created in
+                            # this loop iteration
+                            del scaled_tile_pixels, tile_dict
+                        del scaled_chunk_pixels, chunk_dict
+                    del slide_dict
+                del study_dict
+
+            """Return this generator (iterable) over the tiles"""
             return my_iterable()
 
     def __init__(self):
