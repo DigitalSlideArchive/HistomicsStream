@@ -25,21 +25,21 @@ class CreateTensorFlowDataset:
                 'study_description["version"] must exist and be equal to "version-1".'
             )
         if not (
-            "number_pixel_rows_for_tile" in study_description
-            and isinstance(study_description["number_pixel_rows_for_tile"], int)
-            and study_description["number_pixel_rows_for_tile"] > 0
+            "tile_height" in study_description
+            and isinstance(study_description["tile_height"], int)
+            and study_description["tile_height"] > 0
         ):
             raise ValueError(
-                'study_description["number_pixel_rows_for_tile"]'
+                'study_description["tile_height"]'
                 " must exist and be a positive integer"
             )
         if not (
-            "number_pixel_columns_for_tile" in study_description
-            and isinstance(study_description["number_pixel_columns_for_tile"], int)
-            and study_description["number_pixel_columns_for_tile"] > 0
+            "tile_width" in study_description
+            and isinstance(study_description["tile_width"], int)
+            and study_description["tile_width"] > 0
         ):
             raise ValueError(
-                'study_description["number_pixel_columns_for_tile"]'
+                'study_description["tile_width"]'
                 " must exist and be a positive integer"
             )
         for slide in study_description["slides"].values():
@@ -134,32 +134,28 @@ class CreateTensorFlowDataset:
         return study_dataset
 
     def _designate_chunks_for_tiles(self, study_description):
-        number_pixel_rows_for_tile = study_description["number_pixel_rows_for_tile"]
-        number_pixel_columns_for_tile = study_description[
-            "number_pixel_columns_for_tile"
-        ]
+        tile_height = study_description["tile_height"]
+        tile_width = study_description["tile_width"]
 
         for slide in study_description["slides"].values():
             if not (
-                "number_pixel_rows_for_chunk" in slide
-                and isinstance(slide["number_pixel_rows_for_chunk"], int)
-                and slide["number_pixel_rows_for_chunk"] > 0
+                "chunk_height" in slide
+                and isinstance(slide["chunk_height"], int)
+                and slide["chunk_height"] > 0
             ):
                 raise ValueError(
-                    'slide["number_pixel_rows_for_chunk"]'
-                    " must exist and be a positive integer"
+                    'slide["chunk_height"]' " must exist and be a positive integer"
                 )
             if not (
-                "number_pixel_columns_for_chunk" in slide
-                and isinstance(slide["number_pixel_columns_for_chunk"], int)
-                and slide["number_pixel_columns_for_chunk"] > 0
+                "chunk_width" in slide
+                and isinstance(slide["chunk_width"], int)
+                and slide["chunk_width"] > 0
             ):
                 raise ValueError(
-                    'slide["number_pixel_columns_for_chunk"]'
-                    " must exist and be a positive integer"
+                    'slide["chunk_width"]' " must exist and be a positive integer"
                 )
-            number_pixel_rows_for_chunk = slide["number_pixel_rows_for_chunk"]
-            number_pixel_columns_for_chunk = slide["number_pixel_columns_for_chunk"]
+            chunk_height = slide["chunk_height"]
+            chunk_width = slide["chunk_width"]
 
             tiles_as_sorted_list = list(slide["tiles"].items())
             tiles_as_sorted_list.sort(
@@ -175,9 +171,8 @@ class CreateTensorFlowDataset:
                 chunk = chunks[f"chunk_{number_of_chunks}"] = {
                     "chunk_top": tile[1]["tile_top"],
                     "chunk_left": tile[1]["tile_left"],
-                    "chunk_bottom": tile[1]["tile_top"] + number_pixel_rows_for_chunk,
-                    "chunk_right": tile[1]["tile_left"]
-                    + number_pixel_columns_for_chunk,
+                    "chunk_bottom": tile[1]["tile_top"] + chunk_height,
+                    "chunk_right": tile[1]["tile_left"] + chunk_width,
                 }
                 number_of_chunks += 1
 
@@ -187,10 +182,8 @@ class CreateTensorFlowDataset:
                 subsequent_chunks = []
                 for tile in tiles_as_sorted_list:
                     if (
-                        tile[1]["tile_top"] + number_pixel_rows_for_tile
-                        <= chunk["chunk_bottom"]
-                        and tile[1]["tile_left"] + number_pixel_columns_for_tile
-                        <= chunk["chunk_right"]
+                        tile[1]["tile_top"] + tile_height <= chunk["chunk_bottom"]
+                        and tile[1]["tile_left"] + tile_width <= chunk["chunk_right"]
                         and tile[1]["tile_left"] >= chunk["chunk_left"]
                         and tile[1]["tile_top"] >= chunk["chunk_top"]
                     ):
@@ -210,12 +203,10 @@ class CreateTensorFlowDataset:
                     [tile["tile_left"] for tile in tiles.values()]
                 )
                 chunk["chunk_bottom"] = (
-                    max([tile["tile_top"] for tile in tiles.values()])
-                    + number_pixel_rows_for_tile
+                    max([tile["tile_top"] for tile in tiles.values()]) + tile_height
                 )
                 chunk["chunk_right"] = (
-                    max([tile["tile_left"] for tile in tiles.values()])
-                    + number_pixel_columns_for_tile
+                    max([tile["tile_left"] for tile in tiles.values()]) + tile_width
                 )
 
     @tf.function
@@ -243,17 +234,16 @@ class CreateTensorFlowDataset:
         number_of_tiles = tf.size(elem["tiles_top"])
         tiles = tf.TensorArray(dtype=tf.uint8, size=number_of_tiles)
 
-        scaled_number_pixel_rows_for_tile = tf.cast(
+        scaled_tile_height = tf.cast(
             tf.math.floor(
-                tf.cast(elem["number_pixel_rows_for_tile"], dtype=tf.float32) / factor
+                tf.cast(elem["tile_height"], dtype=tf.float32) / factor
                 + tf.convert_to_tensor(0.01, dtype=tf.float32)
             ),
             dtype=tf.int32,
         )
-        scaled_number_pixel_columns_for_tile = tf.cast(
+        scaled_tile_width = tf.cast(
             tf.math.floor(
-                tf.cast(elem["number_pixel_columns_for_tile"], dtype=tf.float32)
-                / factor
+                tf.cast(elem["tile_width"], dtype=tf.float32) / factor
                 + tf.convert_to_tensor(0.01, dtype=tf.float32)
             ),
             dtype=tf.int32,
@@ -305,8 +295,8 @@ class CreateTensorFlowDataset:
                             dtype=tf.int32,
                         )
                         - scaled_chunk_left,
-                        scaled_number_pixel_rows_for_tile,
-                        scaled_number_pixel_columns_for_tile,
+                        scaled_tile_height,
+                        scaled_tile_width,
                     ),
                 ),
             )

@@ -26,8 +26,8 @@ def test_histomics_stream_can_be_found():
 
     # Create a study and insert study-wide information
     my_study0 = {"version": "version-1"}
-    my_study0["number_pixel_rows_for_tile"] = 256
-    my_study0["number_pixel_columns_for_tile"] = 256
+    my_study0["tile_height"] = 256
+    my_study0["tile_width"] = 256
     my_slides = my_study0["slides"] = {}
 
     # Add a slide to the study, including slide-wide information with it.
@@ -37,8 +37,8 @@ def test_histomics_stream_can_be_found():
     ] = "/tf/notebooks/histomics_stream/example/TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs"
     my_slide0["slide_name"] = "TCGA-BH-A0BZ-01Z-00-DX1"
     my_slide0["slide_group"] = "TCGA-BH-A0BZ"
-    my_slide0["number_pixel_rows_for_chunk"] = 2048
-    my_slide0["number_pixel_columns_for_chunk"] = 2048
+    my_slide0["chunk_height"] = 2048
+    my_slide0["chunk_width"] = 2048
 
     if False:
         # For each slide, find the appropriate resolution given the
@@ -53,8 +53,8 @@ def test_histomics_stream_can_be_found():
         # Because we don't actually have the image available, make up some numbers.
         my_slide0["level"] = 0
         my_slide0["factor"] = 0.5
-        my_slide0["number_pixel_rows_for_slide"] = 85047
-        my_slide0["number_pixel_columns_for_slide"] = 112334
+        my_slide0["slide_width"] = 85047
+        my_slide0["slide_height"] = 112334
 
     # We are going to demonstrate several approaches to choosing tiles.  Each approach
     # will start with its own copy of the my_study0 that we have built so far.

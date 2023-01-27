@@ -12,9 +12,8 @@ class FindResolutionForSlide:
 
     An instance of class FindResolutionForSlide is a callable that
     will add level, target_magnification, scan_magnification,
-    read_magnification, returned_magnification,
-    number_pixel_rows_for_slide, and number_pixel_columns_for_slide
-    fields to a slide dictionary.
+    read_magnification, returned_magnification, slide_width, and
+    slide_height fields to a slide dictionary.
 
     Parameters for the constructor
     ------------------------------
@@ -95,8 +94,8 @@ class FindResolutionForSlide:
         """
         Add level, target_magnification, scan_magnification,
         read_magnification, returned_magnification,
-        number_pixel_rows_for_slide, and
-        number_pixel_columns_for_slide fields to a slide dictionary.
+        slide_width, and
+        slide_height fields to a slide dictionary.
         """
 
         # Check values.
@@ -177,29 +176,21 @@ class FindResolutionForSlide:
             #    read_magnification to the target_magnification; we compute dimensions
             #    for the target_magnification with math.floor from the
             #    read_magnification to be conservative.
-            number_pixel_rows_for_slide = ts.sizeY
-            number_pixel_columns_for_slide = ts.sizeX
+            slide_width = ts.sizeY
+            slide_height = ts.sizeX
             if scan_magnification != read_magnification:
-                number_pixel_rows_for_slide = math.floor(
-                    number_pixel_rows_for_slide
-                    * read_magnification
-                    / scan_magnification
+                slide_width = math.floor(
+                    slide_width * read_magnification / scan_magnification
                 )
-                number_pixel_columns_for_slide = math.floor(
-                    number_pixel_columns_for_slide
-                    * read_magnification
-                    / scan_magnification
+                slide_height = math.floor(
+                    slide_height * read_magnification / scan_magnification
                 )
             if read_magnification != self.target_magnification:
-                number_pixel_rows_for_slide = math.floor(
-                    number_pixel_rows_for_slide
-                    * self.target_magnification
-                    / read_magnification
+                slide_width = math.floor(
+                    slide_width * self.target_magnification / read_magnification
                 )
-                number_pixel_columns_for_slide = math.floor(
-                    number_pixel_columns_for_slide
-                    * self.target_magnification
-                    / read_magnification
+                slide_height = math.floor(
+                    slide_height * self.target_magnification / read_magnification
                 )
 
         else:
@@ -238,12 +229,10 @@ class FindResolutionForSlide:
             slide["read_magnification"] = returned_magnification
             slide["returned_magnification"] = returned_magnification
 
-            # get slide number_pixel_columns_for_slide, number_pixel_rows_for_slide at
-            # desired magnification. (Note that number_pixel_rows_for_slide is before
-            # number_pixel_columns_for_slide)
-            number_pixel_rows_for_slide, number_pixel_columns_for_slide = source_group[
-                format(level)
-            ].shape[0:2]
+            # get slide slide_height, slide_width at
+            # desired magnification. (Note that slide_width is before
+            # slide_height)
+            slide_width, slide_height = source_group[format(level)].shape[0:2]
 
             if (
                 self.magnification_source == "exact"
@@ -258,8 +247,8 @@ class FindResolutionForSlide:
         # be the same as the magnification for the selected level.  To get the slide
         # size for the magnification that we are using, these values must later be
         # multiplied by returned_magnification / target_magnification.
-        slide["number_pixel_rows_for_slide"] = number_pixel_rows_for_slide
-        slide["number_pixel_columns_for_slide"] = number_pixel_columns_for_slide
+        slide["slide_width"] = slide_width
+        slide["slide_height"] = slide_height
 
     def _get_level_and_magnifications(
         self, target_magnification, estimated_magnifications
@@ -350,22 +339,20 @@ class TilesByGridAndMask:
         if not ("version" in study and study["version"] == "version-1"):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
         if not (
-            "number_pixel_rows_for_tile" in study
-            and isinstance(study["number_pixel_rows_for_tile"], int)
-            and study["number_pixel_rows_for_tile"] > 0
+            "tile_height" in study
+            and isinstance(study["tile_height"], int)
+            and study["tile_height"] > 0
         ):
             raise ValueError(
-                'study["number_pixel_rows_for_tile"]'
-                " must exist and be a positive integer"
+                'study["tile_height"]' " must exist and be a positive integer"
             )
         if not (
-            "number_pixel_columns_for_tile" in study
-            and isinstance(study["number_pixel_columns_for_tile"], int)
-            and study["number_pixel_columns_for_tile"] > 0
+            "tile_width" in study
+            and isinstance(study["tile_width"], int)
+            and study["tile_width"] > 0
         ):
             raise ValueError(
-                'study["number_pixel_columns_for_tile"]'
-                " must exist and be a positive integer"
+                'study["tile_width"]' " must exist and be a positive integer"
             )
         if not (isinstance(randomly_select, int) and -1 <= randomly_select):
             raise ValueError(
@@ -374,22 +361,21 @@ class TilesByGridAndMask:
             )
         if not (
             isinstance(number_pixel_overlap_rows_for_tile, int)
-            and number_pixel_overlap_rows_for_tile < study["number_pixel_rows_for_tile"]
+            and number_pixel_overlap_rows_for_tile < study["tile_height"]
         ):
             raise ValueError(
                 f"number_pixel_overlap_rows_for_tile ({number_pixel_overlap_rows_for_tile})"
                 " must be less than"
-                f' number_pixel_rows_for_tile ({study["number_pixel_rows_for_tile"]}).'
+                f' tile_height ({study["tile_height"]}).'
             )
         if not (
             isinstance(number_pixel_overlap_columns_for_tile, int)
-            and number_pixel_overlap_columns_for_tile
-            < study["number_pixel_columns_for_tile"]
+            and number_pixel_overlap_columns_for_tile < study["tile_width"]
         ):
             raise ValueError(
                 f"number_pixel_overlap_columns_for_tile ({number_pixel_overlap_columns_for_tile})"
                 " must be less than"
-                f' number_pixel_columns_for_tile ({study["number_pixel_columns_for_tile"]}).'
+                f' tile_width ({study["tile_width"]}).'
             )
         if mask_filename != "":
             mask_itk = itk.imread(mask_filename)  # May throw exception
@@ -407,8 +393,8 @@ class TilesByGridAndMask:
             )
 
         # Save values.  To keep garbage collection efficient don't save all of `study`.
-        self.number_pixel_rows_for_tile = study["number_pixel_rows_for_tile"]
-        self.number_pixel_columns_for_tile = study["number_pixel_columns_for_tile"]
+        self.tile_height = study["tile_height"]
+        self.tile_width = study["tile_width"]
         self.randomly_select = randomly_select
         self.number_pixel_overlap_rows_for_tile = number_pixel_overlap_rows_for_tile
         self.number_pixel_overlap_columns_for_tile = (
@@ -426,38 +412,25 @@ class TilesByGridAndMask:
         subset of them.
         """
         # Check values.
-        if "number_pixel_rows_for_slide" not in slide:
-            raise ValueError(
-                'slide["number_pixel_rows_for_slide"] must be already set.'
-            )
-        self.number_pixel_rows_for_slide = slide["number_pixel_rows_for_slide"]
-        if "number_pixel_columns_for_slide" not in slide:
-            raise ValueError(
-                'slide["number_pixel_columns_for_slide"] must be already set.'
-            )
+        if "slide_width" not in slide:
+            raise ValueError('slide["slide_width"] must be already set.')
+        self.slide_width = slide["slide_width"]
+        if "slide_height" not in slide:
+            raise ValueError('slide["slide_height"] must be already set.')
 
-        self.number_pixel_columns_for_slide = slide["number_pixel_columns_for_slide"]
+        self.slide_height = slide["slide_height"]
         #
         # Do the work.
         #
-        row_stride = (
-            self.number_pixel_rows_for_tile - self.number_pixel_overlap_rows_for_tile
-        )
-        column_stride = (
-            self.number_pixel_columns_for_tile
-            - self.number_pixel_overlap_columns_for_tile
-        )
+        row_stride = self.tile_height - self.number_pixel_overlap_rows_for_tile
+        column_stride = self.tile_width - self.number_pixel_overlap_columns_for_tile
 
         # Return information to the user
-        slide["number_tile_rows_for_slide"] = math.floor(
-            (self.number_pixel_rows_for_slide - self.number_pixel_overlap_rows_for_tile)
-            / row_stride
+        slide["slide_height_tiles"] = math.floor(
+            (self.slide_width - self.number_pixel_overlap_rows_for_tile) / row_stride
         )
-        slide["number_tile_columns_for_slide"] = math.floor(
-            (
-                self.number_pixel_columns_for_slide
-                - self.number_pixel_overlap_columns_for_tile
-            )
+        slide["slide_width_tiles"] = math.floor(
+            (self.slide_height - self.number_pixel_overlap_columns_for_tile)
             / column_stride
         )
 
@@ -475,14 +448,8 @@ class TilesByGridAndMask:
             if (
                 abs(
                     math.log(
-                        (
-                            self.number_pixel_columns_for_slide
-                            / self.number_pixel_columns_for_mask
-                        )
-                        / (
-                            self.number_pixel_rows_for_slide
-                            / self.number_pixel_rows_for_mask
-                        )
+                        (self.slide_height / self.number_pixel_columns_for_mask)
+                        / (self.slide_width / self.number_pixel_rows_for_mask)
                     )
                 )
                 > 0.20
@@ -518,12 +485,8 @@ class TilesByGridAndMask:
         # Look at each tile in turn
         tiles = slide["tiles"] = {}
         number_of_tiles = 0
-        top_too_high = (
-            self.number_pixel_rows_for_slide - self.number_pixel_rows_for_tile + 1
-        )
-        left_too_high = (
-            self.number_pixel_columns_for_slide - self.number_pixel_columns_for_tile + 1
-        )
+        top_too_high = self.slide_width - self.tile_height + 1
+        left_too_high = self.slide_height - self.tile_width + 1
         for top in range(0, top_too_high, row_stride):
             for left in range(0, left_too_high, column_stride):
                 if not (has_mask and self.mask_rejects(top, left)):
@@ -564,24 +527,12 @@ class TilesByGridAndMask:
         return response
 
     def mask_rejects(self, top, left):
-        bottom = top + self.number_pixel_rows_for_tile
-        right = left + self.number_pixel_columns_for_tile
-        mask_top = (
-            top * self.number_pixel_rows_for_mask / self.number_pixel_rows_for_slide
-        )
-        mask_bottom = (
-            bottom * self.number_pixel_rows_for_mask / self.number_pixel_rows_for_slide
-        )
-        mask_left = (
-            left
-            * self.number_pixel_columns_for_mask
-            / self.number_pixel_columns_for_slide
-        )
-        mask_right = (
-            right
-            * self.number_pixel_columns_for_mask
-            / self.number_pixel_columns_for_slide
-        )
+        bottom = top + self.tile_height
+        right = left + self.tile_width
+        mask_top = top * self.number_pixel_rows_for_mask / self.slide_width
+        mask_bottom = bottom * self.number_pixel_rows_for_mask / self.slide_width
+        mask_left = left * self.number_pixel_columns_for_mask / self.slide_height
+        mask_right = right * self.number_pixel_columns_for_mask / self.slide_height
         cumulative_top_left = self.interpolate_cumulative(mask_top, mask_left)
         cumulative_top_right = self.interpolate_cumulative(mask_top, mask_right)
         cumulative_bottom_left = self.interpolate_cumulative(mask_bottom, mask_left)
@@ -644,22 +595,20 @@ class TilesByList:
         if not ("version" in study and study["version"] == "version-1"):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
         if not (
-            "number_pixel_rows_for_tile" in study
-            and isinstance(study["number_pixel_rows_for_tile"], int)
-            and study["number_pixel_rows_for_tile"] > 0
+            "tile_height" in study
+            and isinstance(study["tile_height"], int)
+            and study["tile_height"] > 0
         ):
             raise ValueError(
-                'study["number_pixel_rows_for_tile"]'
-                " must exist and be a positive integer"
+                'study["tile_height"]' " must exist and be a positive integer"
             )
         if not (
-            "number_pixel_columns_for_tile" in study
-            and isinstance(study["number_pixel_columns_for_tile"], int)
-            and study["number_pixel_columns_for_tile"] > 0
+            "tile_width" in study
+            and isinstance(study["tile_width"], int)
+            and study["tile_width"] > 0
         ):
             raise ValueError(
-                'study["number_pixel_columns_for_tile"]'
-                " must exist and be a positive integer"
+                'study["tile_width"]' " must exist and be a positive integer"
             )
         if not (isinstance(randomly_select, int) and -1 <= randomly_select):
             raise ValueError(
@@ -704,8 +653,8 @@ class TilesByList:
 
         # Save values.  To keep garbage collection efficient don't save all of `study`,
         # just the parts that we need.
-        self.number_pixel_rows_for_tile = study["number_pixel_rows_for_tile"]
-        self.number_pixel_columns_for_tile = study["number_pixel_columns_for_tile"]
+        self.tile_height = study["tile_height"]
+        self.tile_width = study["tile_width"]
         self.randomly_select = randomly_select
         self.tiles_dictionary = copy.deepcopy(
             tiles_dictionary
@@ -756,22 +705,20 @@ class TilesRandomly:
         if not ("version" in study and study["version"] == "version-1"):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
         if not (
-            "number_pixel_rows_for_tile" in study
-            and isinstance(study["number_pixel_rows_for_tile"], int)
-            and study["number_pixel_rows_for_tile"] > 0
+            "tile_height" in study
+            and isinstance(study["tile_height"], int)
+            and study["tile_height"] > 0
         ):
             raise ValueError(
-                'study["number_pixel_rows_for_tile"]'
-                " must exist and be a positive integer"
+                'study["tile_height"]' " must exist and be a positive integer"
             )
         if not (
-            "number_pixel_columns_for_tile" in study
-            and isinstance(study["number_pixel_columns_for_tile"], int)
-            and study["number_pixel_columns_for_tile"] > 0
+            "tile_width" in study
+            and isinstance(study["tile_width"], int)
+            and study["tile_width"] > 0
         ):
             raise ValueError(
-                'study["number_pixel_columns_for_tile"]'
-                " must exist and be a positive integer"
+                'study["tile_width"]' " must exist and be a positive integer"
             )
         if not (isinstance(randomly_select, int) and 0 <= randomly_select):
             raise ValueError(
@@ -780,31 +727,21 @@ class TilesRandomly:
             )
 
         # Save values.  To keep garbage collection efficient don't save all of `study`.
-        self.number_pixel_rows_for_tile = study["number_pixel_rows_for_tile"]
-        self.number_pixel_columns_for_tile = study["number_pixel_columns_for_tile"]
+        self.tile_height = study["tile_height"]
+        self.tile_width = study["tile_width"]
         self.randomly_select = randomly_select
 
     def __call__(self, slide):
         """
         Select a random subset of all possible tiles.
         """
-        if "number_pixel_rows_for_slide" not in slide:
-            raise ValueError(
-                'slide["number_pixel_rows_for_slide"] must be already set.'
-            )
-        if "number_pixel_columns_for_slide" not in slide:
-            raise ValueError(
-                'slide["number_pixel_columns_for_slide"] must be already set.'
-            )
+        if "slide_width" not in slide:
+            raise ValueError('slide["slide_width"] must be already set.')
+        if "slide_height" not in slide:
+            raise ValueError('slide["slide_height"] must be already set.')
 
-        row_too_big = (
-            slide["number_pixel_rows_for_slide"] - self.number_pixel_rows_for_tile + 1
-        )
-        column_too_big = (
-            slide["number_pixel_columns_for_slide"]
-            - self.number_pixel_columns_for_tile
-            + 1
-        )
+        row_too_big = slide["slide_width"] - self.tile_height + 1
+        column_too_big = slide["slide_height"] - self.tile_width + 1
         row_column_list = [
             (random.randrange(0, row_too_big), random.randrange(0, column_too_big))
             for _ in range(self.randomly_select)
