@@ -11,9 +11,9 @@ jobs:
         python-version: ["3.6", "3.7", "3.8", "3.9"]
 
         include:
-          - flake8-python-git-tag: "<4.0.0"
-          - itk-python-git-tag: "~=5.2.0"
-          - pytest-python-git-tag: "<7.0.0"
+          - flake8-python-git-tag: ""
+          - itk-python-git-tag: ""
+          - pytest-python-git-tag: ""
 
     steps:
       - uses: actions/checkout@v2
