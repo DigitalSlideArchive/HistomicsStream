@@ -317,12 +317,12 @@ class TilesByGridAndMask:
         would otherwise be written to the slide dictionary.  A value
         of -1 is the default and means that all tiles should be
         written.
-    number_pixel_overlap_rows_for_tile
+    tile_overlap_height
         Specifies the desired amount of vertical overlap (measured in
         rows of pixels) between adjacent tiles.  This defaults to 0,
         which means that there is no overlap between adjacent tiles;
         they are abutting.
-    number_pixel_overlap_columns_for_tile
+    tile_overlap_width
         Specifies the desired amount of horizontal overlap (measured
         in columns of pixels) between adjacent tiles.  This defaults
         to 0, which means that there is no overlap between adjacent
@@ -335,7 +335,7 @@ class TilesByGridAndMask:
         the mask indicates that the tile should be retained.  The
         default is "", which means that there is no masking.
     mask_threshold : float
-        A value in [0.0, 1.1].  A tile is retained if the fraction of
+        A value in [0.0, 1.0].  A tile is retained if the fraction of
         the tile overlapping non-zero pixels in the mask is at least
         the mask_threshold.
 
@@ -345,8 +345,8 @@ class TilesByGridAndMask:
         self,
         study,
         randomly_select=-1,  # Defaults to select all
-        number_pixel_overlap_rows_for_tile=0,  # Defaults to no overlap
-        number_pixel_overlap_columns_for_tile=0,
+        tile_overlap_height=0,  # Defaults to no overlap
+        tile_overlap_width=0,
         mask_filename="",  # Defaults to no masking
         mask_threshold=0.0,  # Defaults to any overlap with the mask
     ):
@@ -379,20 +379,20 @@ class TilesByGridAndMask:
                 " must be a non-negative integer or -1."
             )
         if not (
-            isinstance(number_pixel_overlap_rows_for_tile, int)
-            and number_pixel_overlap_rows_for_tile < study["tile_height"]
+            isinstance(tile_overlap_height, int)
+            and tile_overlap_height < study["tile_height"]
         ):
             raise ValueError(
-                f"number_pixel_overlap_rows_for_tile ({number_pixel_overlap_rows_for_tile})"
+                f"tile_overlap_height ({tile_overlap_height})"
                 " must be less than"
                 f' tile_height ({study["tile_height"]}).'
             )
         if not (
-            isinstance(number_pixel_overlap_columns_for_tile, int)
-            and number_pixel_overlap_columns_for_tile < study["tile_width"]
+            isinstance(tile_overlap_width, int)
+            and tile_overlap_width < study["tile_width"]
         ):
             raise ValueError(
-                f"number_pixel_overlap_columns_for_tile ({number_pixel_overlap_columns_for_tile})"
+                f"tile_overlap_width ({tile_overlap_width})"
                 " must be less than"
                 f' tile_width ({study["tile_width"]}).'
             )
@@ -415,10 +415,8 @@ class TilesByGridAndMask:
         self.tile_height = study["tile_height"]
         self.tile_width = study["tile_width"]
         self.randomly_select = randomly_select
-        self.number_pixel_overlap_rows_for_tile = number_pixel_overlap_rows_for_tile
-        self.number_pixel_overlap_columns_for_tile = (
-            number_pixel_overlap_columns_for_tile
-        )
+        self.tile_overlap_height = tile_overlap_height
+        self.tile_overlap_width = tile_overlap_width
         self.mask_filename = mask_filename
         if self.mask_filename != "":
             self.mask_itk = mask_itk
@@ -441,34 +439,30 @@ class TilesByGridAndMask:
         #
         # Do the work.
         #
-        row_stride = self.tile_height - self.number_pixel_overlap_rows_for_tile
-        column_stride = self.tile_width - self.number_pixel_overlap_columns_for_tile
+        row_stride = self.tile_height - self.tile_overlap_height
+        column_stride = self.tile_width - self.tile_overlap_width
 
         # Return information to the user
         slide["slide_height_tiles"] = math.floor(
-            (self.slide_width - self.number_pixel_overlap_rows_for_tile) / row_stride
+            (self.slide_width - self.tile_overlap_height) / row_stride
         )
         slide["slide_width_tiles"] = math.floor(
-            (self.slide_height - self.number_pixel_overlap_columns_for_tile)
-            / column_stride
+            (self.slide_height - self.tile_overlap_width) / column_stride
         )
 
         # Pre-process the mask
         has_mask = hasattr(self, "mask_itk")
         if has_mask:
-            (
-                self.number_pixel_rows_for_mask,
-                self.number_pixel_columns_for_mask,
-            ) = self.mask_itk.shape
-            slide["number_pixel_rows_for_mask"] = self.number_pixel_rows_for_mask
-            slide["number_pixel_columns_for_mask"] = self.number_pixel_columns_for_mask
+            (self.mask_height, self.mask_width) = self.mask_itk.shape
+            slide["mask_height"] = self.mask_height
+            slide["mask_width"] = self.mask_width
 
             # Check that the input and output aspect ratios are pretty close
             if (
                 abs(
                     math.log(
-                        (self.slide_height / self.number_pixel_columns_for_mask)
-                        / (self.slide_width / self.number_pixel_rows_for_mask)
+                        (self.slide_height / self.mask_width)
+                        / (self.slide_width / self.mask_height)
                     )
                 )
                 > 0.20
@@ -486,16 +480,11 @@ class TilesByGridAndMask:
             # are 2^31 (~2 billion = ~ 46k by 46k) or more non-zero pixel values in our
             # mask.
             self.cumulative_mask = np.zeros(
-                (
-                    self.number_pixel_rows_for_mask + 2,
-                    self.number_pixel_columns_for_mask + 2,
-                ),
-                dtype=np.int64,
+                (self.mask_height + 2, self.mask_width + 2), dtype=np.int64
             )
             nonzero = np.vectorize(lambda x: int(x != 0))
             self.cumulative_mask[
-                1 : self.number_pixel_rows_for_mask + 1,
-                1 : self.number_pixel_columns_for_mask + 1,
+                1 : self.mask_height + 1, 1 : self.mask_width + 1
             ] = nonzero(itk.GetArrayViewFromImage(self.mask_itk))
             self.cumulative_mask = np.cumsum(
                 np.cumsum(self.cumulative_mask, axis=0), axis=1
@@ -548,10 +537,10 @@ class TilesByGridAndMask:
     def mask_rejects(self, top, left):
         bottom = top + self.tile_height
         right = left + self.tile_width
-        mask_top = top * self.number_pixel_rows_for_mask / self.slide_width
-        mask_bottom = bottom * self.number_pixel_rows_for_mask / self.slide_width
-        mask_left = left * self.number_pixel_columns_for_mask / self.slide_height
-        mask_right = right * self.number_pixel_columns_for_mask / self.slide_height
+        mask_top = top * self.mask_height / self.slide_width
+        mask_bottom = bottom * self.mask_height / self.slide_width
+        mask_left = left * self.mask_width / self.slide_height
+        mask_right = right * self.mask_width / self.slide_height
         cumulative_top_left = self.interpolate_cumulative(mask_top, mask_left)
         cumulative_top_right = self.interpolate_cumulative(mask_top, mask_right)
         cumulative_bottom_left = self.interpolate_cumulative(mask_bottom, mask_left)
@@ -767,7 +756,7 @@ class TilesRandomly:
         ]
         tiles = slide["tiles"] = {}
         number_of_tiles = 0
-        for (row, column) in row_column_list:
+        for row, column in row_column_list:
             tiles[f"tile_{number_of_tiles}"] = {"tile_top": row, "tile_left": column}
             number_of_tiles += 1
 

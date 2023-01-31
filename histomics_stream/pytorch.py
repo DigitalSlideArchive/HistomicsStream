@@ -76,15 +76,11 @@ class CreateTorchDataloader(configure.ChunkLocations):
                     filename = slide_dict["filename"]
                     returned_magnification = slide_dict["returned_magnification"]
                     factor = slide_dict["target_magnification"] / returned_magnification
-                    scaled_number_pixel_rows_for_tile = (
-                        configure.ChunkLocations.scale_it(
-                            slide_dict["number_pixel_rows_for_tile"], factor
-                        )
+                    scaled_tile_height = configure.ChunkLocations.scale_it(
+                        slide_dict["tile_height"], factor
                     )
-                    scaled_number_pixel_columns_for_tile = (
-                        configure.ChunkLocations.scale_it(
-                            slide_dict["number_pixel_columns_for_tile"], factor
-                        )
+                    scaled_tile_width = configure.ChunkLocations.scale_it(
+                        slide_dict["tile_width"], factor
                     )
 
                     for chunk_description in slide_description["chunks"].values():
@@ -114,13 +110,13 @@ class CreateTorchDataloader(configure.ChunkLocations):
 
                         # Use `:3` to change RGBA (if applicable) to RGB.
                         scaled_chunk_pixels = configure.ChunkLocations.read_large_image(
-                                filename,
-                                scaled_chunk_top,
-                                scaled_chunk_left,
-                                scaled_chunk_bottom,
-                                scaled_chunk_right,
-                                returned_magnification,
-                            )[..., :3].astype(dtype=np.float32)
+                            filename,
+                            scaled_chunk_top,
+                            scaled_chunk_left,
+                            scaled_chunk_bottom,
+                            scaled_chunk_right,
+                            returned_magnification,
+                        )[..., :3].astype(dtype=np.float32)
                         # Color is the last/fastest dimension for images read with
                         # large_image, but channel is the first/slowest for Torch
                         # tensors.
@@ -147,13 +143,13 @@ class CreateTorchDataloader(configure.ChunkLocations):
                                 )
                                 - scaled_chunk_left
                             )
-                            scaled_tile_bottom = (
-                                scaled_tile_top + scaled_number_pixel_rows_for_tile
-                            )
-                            scaled_tile_right = (
-                                scaled_tile_left + scaled_number_pixel_columns_for_tile
-                            )
-                            scaled_tile_pixels = scaled_chunk_pixels[:, scaled_tile_top:scaled_tile_bottom, scaled_tile_left:scaled_tile_right]
+                            scaled_tile_bottom = scaled_tile_top + scaled_tile_height
+                            scaled_tile_right = scaled_tile_left + scaled_tile_width
+                            scaled_tile_pixels = scaled_chunk_pixels[
+                                :,
+                                scaled_tile_top:scaled_tile_bottom,
+                                scaled_tile_left:scaled_tile_right,
+                            ]
 
                             # Yield the pixel data as a tensor and the Python dict of
                             # associated information

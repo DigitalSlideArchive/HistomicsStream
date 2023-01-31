@@ -97,9 +97,9 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
         # We have accumulated the chunk datasets into a study_dataset where each element
         # is a chunk.  Read in the chunk pixel data and split it into tiles.
         study_dataset = study_dataset.map(
-            self._read_and_split_chunk_pixels, **self.dataset_map_options
+            self._read_and_split_chunk, **self.dataset_map_options
         )
-        # print("_read_and_split_chunk_pixels done")
+        # print("_read_and_split_chunk done")
         # Change study_dataset so that each element is a tile.
         study_dataset = study_dataset.unbatch()
         # print("unbatch done")
@@ -116,16 +116,16 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
         return study_dataset
 
     @tf.function
-    def _read_and_split_chunk_pixels(self, elem):
-        # Get chunk's pixel data from disk and load it into chunk_pixels_as_tensor.
+    def _read_and_split_chunk(self, elem):
+        # Get chunk's pixel data from disk and load it into chunk_as_tensor.
         # Note that if elem["factor"] differs from 1.0 then this chunk will have
         # number_of_rows ((chunk_bottom - chunk_top) / factor, and number_of_columns =
         # ((chunk_right - chunk_left) / factor.
         factor = tf.cast(elem["target_magnification"], dtype=tf.float32) / tf.cast(
             elem["returned_magnification"], dtype=tf.float32
         )
-        chunk_pixels_as_tensor = tf.py_function(
-            func=self._py_read_chunk_pixels,
+        chunk_as_tensor = tf.py_function(
+            func=self._py_read_chunk,
             inp=[
                 elem["chunk_top"],
                 elem["chunk_left"],
@@ -178,7 +178,7 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
                 tiles.write(
                     i,
                     tf.image.crop_to_bounding_box(
-                        chunk_pixels_as_tensor,
+                        chunk_as_tensor,
                         tf.cast(
                             tf.math.floor(
                                 tf.cast(
@@ -223,7 +223,7 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
         }
         return response
 
-    def _py_read_chunk_pixels(
+    def _py_read_chunk(
         self,
         chunk_top,
         chunk_left,
