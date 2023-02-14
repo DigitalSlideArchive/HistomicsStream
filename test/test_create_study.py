@@ -48,11 +48,11 @@ def test_create_study():
         # For each slide, find the appropriate resolution given the
         # desired_magnification and magnification_tolerance.  In this example, we use
         # the same parameters for each slide, but this is not required generally.
-        find_resolution_for_slide = hs.configure.FindResolutionForSlide(
+        find_slide_resolution = hs.configure.FindResolutionForSlide(
             my_study0, desired_magnification=20, magnification_tolerance=0.02
         )
         for slide in my_study0["slides"].values():
-            find_resolution_for_slide(slide)
+            find_slide_resolution(slide)
     else:
         # Because we don't actually have the image available, make up some numbers.
         my_slide0["level"] = 0
@@ -64,24 +64,24 @@ def test_create_study():
     # will start with its own copy of the my_study0 that we have built so far.
 
     # Demonstrate TilesByGridAndMask without a mask
-    my_study_tiles_by_grid = copy.deepcopy(my_study0)
+    my_study_by_grid = copy.deepcopy(my_study0)
     tiles_by_grid = hs.configure.TilesByGridAndMask(
-        my_study_tiles_by_grid,
+        my_study_by_grid,
         tile_overlap_height=32,
         tile_overlap_width=32,
         randomly_select=100,
     )
     # We could apply this to a subset of the slides, but we will apply it to all slides
     # in this example.
-    for slide in my_study_tiles_by_grid["slides"].values():
+    for slide in my_study_by_grid["slides"].values():
         tiles_by_grid(slide)
 
     if False:
         # Skip this test for now because we don't have the mask file available.
         # Demonstrate TilesByGridAndMask with a mask
-        my_study_tiles_by_grid_and_mask = copy.deepcopy(my_study0)
+        my_study_by_grid_and_mask = copy.deepcopy(my_study0)
         tiles_by_grid_and_mask = hs.configure.TilesByGridAndMask(
-            my_study_tiles_by_grid_and_mask,
+            my_study_by_grid_and_mask,
             tile_overlap_height=0,
             tile_overlap_width=0,
             mask_filename="/tf/notebooks/histomics_stream/example/TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913-mask.png",
@@ -89,29 +89,27 @@ def test_create_study():
         )
         # We could apply this to a subset of the slides, but we will apply it to all
         # slides in this example.
-        for slide in my_study_tiles_by_grid_and_mask["slides"].values():
+        for slide in my_study_by_grid_and_mask["slides"].values():
             tiles_by_grid_and_mask(slide)
 
     # Demonstrate TilesByList
-    my_study_tiles_by_list = copy.deepcopy(my_study0)
+    my_study_by_list = copy.deepcopy(my_study0)
     tiles_by_list = hs.configure.TilesByList(
-        my_study_tiles_by_list,
+        my_study_by_list,
         randomly_select=5,
-        tiles_dictionary=my_study_tiles_by_grid["slides"]["Slide_0"]["tiles"],
+        tiles_dictionary=my_study_by_grid["slides"]["Slide_0"]["tiles"],
     )
     # We could apply this to a subset of the slides, but we will apply it to all slides
     # in this example.
-    for slide in my_study_tiles_by_list["slides"].values():
+    for slide in my_study_by_list["slides"].values():
         tiles_by_list(slide)
 
     # Demonstrate TilesRandomly
-    my_study_tiles_randomly = copy.deepcopy(my_study0)
-    tiles_randomly = hs.configure.TilesRandomly(
-        my_study_tiles_randomly, randomly_select=3
-    )
+    my_study_randomly = copy.deepcopy(my_study0)
+    tiles_randomly = hs.configure.TilesRandomly(my_study_randomly, randomly_select=3)
     # We could apply this to a subset of the slides, but we will apply it to all slides
     # in this example.
-    for slide in my_study_tiles_randomly["slides"].values():
+    for slide in my_study_randomly["slides"].values():
         tiles_randomly(slide)
 
     # The next step would be creating a dataset/dataloader for a machine learning

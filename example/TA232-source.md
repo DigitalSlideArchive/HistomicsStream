@@ -16,7 +16,7 @@ The corresponding mask `example/TA232-mask.png` is randomly generated in Python 
 ```python
 import numpy as np
 from PIL import Image
-arr = np.random.randint(0, 2, (number_of_rows_of_mask, number_of_columns_of_mask), dtype=np.int8)
+arr = np.random.randint(0, 2, (mask_height, mask_width), dtype=np.int8)
 im = Image.fromarray(arr)
 im.save("TA232-mask.png")
 ```

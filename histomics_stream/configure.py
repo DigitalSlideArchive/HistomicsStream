@@ -492,17 +492,14 @@ class TilesByGridAndMask:
 
         # Look at each tile in turn
         tiles = slide["tiles"] = {}
-        number_of_tiles = 0
+        num_tiles = 0
         top_too_high = self.slide_width - self.tile_height + 1
         left_too_high = self.slide_height - self.tile_width + 1
         for top in range(0, top_too_high, row_stride):
             for left in range(0, left_too_high, column_stride):
                 if not (has_mask and self.mask_rejects(top, left)):
-                    tiles[f"tile_{number_of_tiles}"] = {
-                        "tile_top": top,
-                        "tile_left": left,
-                    }
-                number_of_tiles += 1  # Increment even if tile is skipped.
+                    tiles[f"tile_{num_tiles}"] = {"tile_top": top, "tile_left": left}
+                num_tiles += 1  # Increment even if tile is skipped.
 
         # Choose a subset of the tiles randomly
         all_tile_names = tiles.keys()
@@ -755,10 +752,10 @@ class TilesRandomly:
             for _ in range(self.randomly_select)
         ]
         tiles = slide["tiles"] = {}
-        number_of_tiles = 0
+        num_tiles = 0
         for row, column in row_column_list:
-            tiles[f"tile_{number_of_tiles}"] = {"tile_top": row, "tile_left": column}
-            number_of_tiles += 1
+            tiles[f"tile_{num_tiles}"] = {"tile_top": row, "tile_left": column}
+            num_tiles += 1
 
 
 class ChunkLocations:
@@ -842,16 +839,16 @@ class ChunkLocations:
                 key=lambda x: x[1]["tile_top"]
             )  # first priority key
             chunks = slide["chunks"] = {}
-            number_of_chunks = 0
+            num_chunks = 0
             while len(tiles_as_sorted_list) > 0:
                 tile = tiles_as_sorted_list[0]
-                chunk = chunks[f"chunk_{number_of_chunks}"] = {
+                chunk = chunks[f"chunk_{num_chunks}"] = {
                     "chunk_top": tile[1]["tile_top"],
                     "chunk_left": tile[1]["tile_left"],
                     "chunk_bottom": tile[1]["tile_top"] + chunk_height,
                     "chunk_right": tile[1]["tile_left"] + chunk_width,
                 }
-                number_of_chunks += 1
+                num_chunks += 1
 
                 # This implementation has a run time that is quadratic in the number of
                 # tiles that a slide has.  It is too slow; we should make it faster.

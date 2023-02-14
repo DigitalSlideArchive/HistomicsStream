@@ -49,7 +49,7 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
         }
         # print("study_as_tensors done")
 
-        number_of_chunks = 0
+        num_chunks = 0
         for slide_description in study_description["slides"].values():
             slide_as_tensors = {
                 **study_as_tensors,
@@ -88,11 +88,11 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
 
                 # Make a tensorflow Dataset from this chunk.
                 chunk_dataset = tf.data.Dataset.from_tensor_slices(chunk_as_tensors)
-                if number_of_chunks == 0:
+                if num_chunks == 0:
                     study_dataset = chunk_dataset
                 else:
                     study_dataset = study_dataset.concatenate(chunk_dataset)
-                number_of_chunks += 1
+                num_chunks += 1
 
         # We have accumulated the chunk datasets into a study_dataset where each element
         # is a chunk.  Read in the chunk pixel data and split it into tiles.
@@ -119,7 +119,7 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
     def _read_and_split_chunk(self, elem):
         # Get chunk's pixel data from disk and load it into chunk_as_tensor.
         # Note that if elem["factor"] differs from 1.0 then this chunk will have
-        # number_of_rows ((chunk_bottom - chunk_top) / factor, and number_of_columns =
+        # num_rows ((chunk_bottom - chunk_top) / factor, and num_columns =
         # ((chunk_right - chunk_left) / factor.
         factor = tf.cast(elem["target_magnification"], dtype=tf.float32) / tf.cast(
             elem["returned_magnification"], dtype=tf.float32
@@ -137,8 +137,8 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
             ],
             Tout=tf.uint8,
         )
-        number_of_tiles = tf.size(elem["tiles_top"])
-        tiles = tf.TensorArray(dtype=tf.uint8, size=number_of_tiles)
+        num_tiles = tf.size(elem["tiles_top"])
+        tiles = tf.TensorArray(dtype=tf.uint8, size=num_tiles)
 
         scaled_tile_height = tf.cast(
             tf.math.floor(
@@ -170,7 +170,7 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
         )
 
         def condition(i, _):
-            return tf.less(i, number_of_tiles)
+            return tf.less(i, num_tiles)
 
         def body(i, tiles):
             return (
@@ -213,7 +213,7 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
         response = {}
         for key in elem.keys():
             if key not in ("tiles_top", "tiles_left"):
-                response[key] = tf.repeat(elem[key], number_of_tiles)
+                response[key] = tf.repeat(elem[key], num_tiles)
 
         response = {
             **response,
