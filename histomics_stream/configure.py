@@ -1,3 +1,23 @@
+# =========================================================================
+#
+#   Copyright NumFOCUS
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#          https://www.apache.org/licenses/LICENSE-2.0.txt
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+#
+# =========================================================================
+
+"""Whole-slide image streamer for machine learning frameworks."""
+
 import copy
 import itk
 import math
@@ -5,15 +25,55 @@ import numpy as np
 import random
 import re
 
+# Map old key names to their current equivalent
+_key_mapping = {
+    "number_pixel_columns_for_chunk": "chunk_width",
+    "number_pixel_columns_for_mask": "mask_width",
+    "number_pixel_columns_for_slide": "slide_height",
+    "number_pixel_columns_for_tile": "tile_width",
+    "number_pixel_overlap_columns_for_tile": "tile_overlap_width",
+    "number_pixel_overlap_rows_for_tile": "tile_overlap_height",
+    "number_pixel_rows_for_chunk": "chunk_height",
+    "number_pixel_rows_for_mask": "mask_height",
+    "number_pixel_rows_for_slide": "slide_width",
+    "number_pixel_rows_for_tile": "tile_height",
+    "number_tile_columns_for_slide": "slide_width_tiles",
+    "number_tile_rows_for_slide": "slide_height_tiles",
+}
+
+
+_keys_warned = set()
+
+
+def _update_dict(d):
+    for old_key in d.keys() & _key_mapping.keys():
+        # An old key is in use in `d`.
+        new_key = _key_mapping[old_key]
+        if new_key in d:
+            # Both the old and new key are used.
+            raise ValueError(
+                f"Cannot use both {repr(old_key)} key (deprecated) "
+                f"and its replacement {repr(new_key)}"
+            )
+        if old_key not in _keys_warned:
+            print(
+                f"Warning: updating deprecated key {repr(old_key)} "
+                f"to new name {repr(new_key)}"
+            )
+            # Comment out the next line so we do have repeated warnings, in case a
+            # second study comes in with deprecated keys.
+            # _keys_warned.add(old_key)
+        d[new_key] = d[old_key]
+        del d[old_key]
+
 
 class FindResolutionForSlide:
     """
     A class that computes read parameters for slides.
 
-    An instance of class FindResolutionForSlide is a callable that
-    will add level, target_magnification, scan_magnification,
-    read_magnification, returned_magnification, slide_width, and
-    slide_height fields to a slide dictionary.
+    An instance of class FindResolutionForSlide is a callable that will add level,
+    target_magnification, scan_magnification, read_magnification,
+    returned_magnification, slide_width, and slide_height fields to a slide dictionary.
 
     Parameters for the constructor
     ------------------------------
@@ -22,50 +82,42 @@ class FindResolutionForSlide:
         The path of the image file to be read.
 
     target_magnification : float
-        The desired objective magnification for generated tiles.  For
-        example, a value of 10 corresponds to about 1 micron per pixel
-        and a value of 20 corresponds to about 0.5 microns per pixel.
+        The desired objective magnification for generated tiles.  For example, a value
+        of 10 corresponds to about 1 micron per pixel and a value of 20 corresponds to
+        about 0.5 microns per pixel.
 
     magnification_source : str in ["scan", "native", "exact"]
-        "scan" will produce tiles from the highest magnification
-        avaialable. This is typically the slide scanner's objective
-        magnification.
+        "scan" will produce tiles from the highest magnification avaialable. This is
+        typically the slide scanner's objective magnification.
 
-        "native" will produce tiles from the nearest available
-        magnification equal to or greater than target_magnification
-        (within a 2% tolerance). The "native" option is useful when
-        you want to handle resizing of tiles to target_magnification
-        on your own.
+        "native" will produce tiles from the nearest available magnification equal to or
+        greater than target_magnification (within a 2% tolerance). The "native" option
+        is useful when you want to handle resizing of tiles to target_magnification on
+        your own.
 
-        "exact" will produce tiles using "native" option and then
-        resize these tiles to match target_magnification. Resizing is
-        handled by PIL using the Lanczos antialiasing filter since the
-        resizing shrinks the tile by definition.
+        "exact" will produce tiles using "native" option and then resize these tiles to
+        match target_magnification. Resizing is handled by PIL using the Lanczos
+        antialiasing filter since the resizing shrinks the tile by definition.
 
-        For either "scan" or "native", the size of the read and
-        returned tiles will be (tile_height * returned_magnification /
-        target_magnification, tile_width * returned_magnification /
-        target_magnification).  For "exact" the size of the returned
-        tiles will be (tile_height, tile_width).
+        For either "scan" or "native", the size of the read and returned tiles will be
+        (tile_height * returned_magnification / target_magnification, tile_width *
+        returned_magnification / target_magnification).  For "exact" the size of the
+        returned tiles will be (tile_height, tile_width).
 
-        This procedure sets values in the slide dictionary to capture
-        the scan, read, and returned magnification of the tiles. This
-        is helpful for example to resize results to the scan
-        magnification for visualization in HistomicsUI, or to resize
+        This procedure sets values in the slide dictionary to capture the scan, read,
+        and returned magnification of the tiles. This is helpful for example to resize
+        results to the scan magnification for visualization in HistomicsUI, or to resize
         between native and target magnification when using
-        "native". "scan_magnification" is the highest magnification
-        from the source file; "read_magnification" is the
-        magnification read from the source file;
-        "returned_magnification" is the magnification of the returned
-        tiles which is same as "read_magnification" in the case of
-        "scan" or "native" or "target_magnification" in the case of
-        "exact".
+        "native". "scan_magnification" is the highest magnification from the source
+        file; "read_magnification" is the magnification read from the source file;
+        "returned_magnification" is the magnification of the returned tiles which is
+        same as "read_magnification" in the case of "scan" or "native" or
+        "target_magnification" in the case of "exact".
     """
 
     def __init__(self, study, target_magnification, magnification_source):
         """
-        Sanity check the supplied parameters and store them for later
-        use.
+        Sanity check the supplied parameters and store them for later use.
         """
         # Check values.
         if not ("version" in study and study["version"] == "version-1"):
@@ -92,10 +144,9 @@ class FindResolutionForSlide:
 
     def __call__(self, slide):
         """
-        Add level, target_magnification, scan_magnification,
-        read_magnification, returned_magnification,
-        slide_width, and
-        slide_height fields to a slide dictionary.
+        Add level, target_magnification, scan_magnification, read_magnification,
+        returned_magnification, slide_width, and slide_height fields to a slide
+        dictionary.
         """
 
         # Check values.
@@ -239,7 +290,8 @@ class FindResolutionForSlide:
                 and self.target_magnification != returned_magnification
             ):
                 raise ValueError(
-                    f"Couldn't find magnification {self.target_magnification}X in Zarr storage."
+                    f"Couldn't find magnification {self.target_magnification}X "
+                    "in Zarr storage."
                 )
 
         slide["level"] = level
@@ -250,9 +302,8 @@ class FindResolutionForSlide:
         slide["slide_width"] = slide_width
         slide["slide_height"] = slide_height
 
-    def _get_level_and_magnifications(
-        self, target_magnification, estimated_magnifications
-    ):
+    @staticmethod
+    def _get_level_and_magnifications(target_magnification, estimated_magnifications):
         """
         A private subroutine that computes level and magnifications.
         """
@@ -280,61 +331,78 @@ class FindResolutionForSlide:
 
 class TilesByGridAndMask:
     """
-    Select tiles according to a regular grid.  Optionally, restrict
-    the list by a mask that is read from a file.  Optionally, further
-    select a random subset of them.
+    Select tiles according to a regular grid.  Optionally, restrict the list by a mask
+    that is read from a file.  Optionally, further select a random subset of them.
 
-    An instance of class TilesByGridAndMask is a callable that will
-    select the coordinates of tiles to be taken from a slide.  The
-    selected tiles will be written to the slide dictionary.
+    An instance of class TilesByGridAndMask is a callable that will select the
+    coordinates of tiles to be taken from a slide.  The selected tiles will be written
+    to the slide dictionary.
 
     Parameters for the constructor
     ------------------------------
     study : dictionary
-        The study dictionary from which to read parameters about the
-        study.
+        The study dictionary from which to read parameters about the study.
     randomly_select: int
-        The number of tiles to be randomly selected from the list that
-        would otherwise be written to the slide dictionary.  A value
-        of -1 is the default and means that all tiles should be
-        written.
-    number_pixel_overlap_rows_for_tile
-        Specifies the desired amount of vertical overlap (measured in
-        rows of pixels) between adjacent tiles.  This defaults to 0,
-        which means that there is no overlap between adjacent tiles;
-        they are abutting.
-    number_pixel_overlap_columns_for_tile
-        Specifies the desired amount of horizontal overlap (measured
-        in columns of pixels) between adjacent tiles.  This defaults
-        to 0, which means that there is no overlap between adjacent
-        tiles; they are abutting.
+        The number of tiles to be randomly selected from the list that would otherwise
+        be written to the slide dictionary.  A value of -1 is the default and means that
+        all tiles should be written.
+    tile_overlap_height
+        Specifies the desired amount of vertical overlap (measured in rows of pixels)
+        between adjacent tiles.  This defaults to 0, which means that there is no
+        overlap between adjacent tiles; they are abutting.
+    tile_overlap_width
+        Specifies the desired amount of horizontal overlap (measured in columns of
+        pixels) between adjacent tiles.  This defaults to 0, which means that there is
+        no overlap between adjacent tiles; they are abutting.
     mask_filename: string
-        The path of the image file to be read and used as a mask.  The
-        aspect ratio of the mask (in terms of its pixel dimensions) is
-        expected to be about the same as the aspect ratio of the main
-        image ( in terms of its grid of tiles).  A non-zero value in
-        the mask indicates that the tile should be retained.  The
-        default is "", which means that there is no masking.
+        The path of the image file to be read and used as a mask.  The aspect ratio of
+        the mask (in terms of its pixel dimensions) is expected to be about the same as
+        the aspect ratio of the main image ( in terms of its grid of tiles).  A non-zero
+        value in the mask indicates that the tile should be retained.  The default is
+        "", which means that there is no masking.
     mask_threshold : float
-        A value in [0.0, 1.1].  A tile is retained if the fraction of
-        the tile overlapping non-zero pixels in the mask is at least
-        the mask_threshold.
+        A value in [0.0, 1.0].  A tile is retained if the fraction of the tile
+        overlapping non-zero pixels in the mask is at least the mask_threshold.
 
     """
 
-    def __init__(
-        self,
-        study,
-        randomly_select=-1,  # Defaults to select all
-        number_pixel_overlap_rows_for_tile=0,  # Defaults to no overlap
-        number_pixel_overlap_columns_for_tile=0,
-        mask_filename="",  # Defaults to no masking
-        mask_threshold=0.0,  # Defaults to any overlap with the mask
-    ):
+    def __init__(self, study, **kwargs):
         """
-        Sanity check the supplied parameters and store them for later
-        use.
+        Sanity check the supplied parameters and store them for later use.
         """
+        # Update keys of the dictionary from deprecated names
+        _update_dict(kwargs)
+        bad_keys = kwargs.keys() - {
+            "randomly_select",
+            "tile_overlap_height",
+            "tile_overlap_width",
+            "mask_filename",
+            "mask_threshold",
+        }
+        if bad_keys:
+            raise ValueError(
+                f"Unrecognized parameters {repr(bad_keys)} in TilesByGridAndMask.__init__"
+            )
+
+        # randomly_select defaults to select all
+        randomly_select = (
+            kwargs["randomly_select"] if "randomly_select" in kwargs else -1
+        )
+        # Defaults to no overlap
+        tile_overlap_height = (
+            kwargs["tile_overlap_height"] if "tile_overlap_height" in kwargs else 0
+        )
+        tile_overlap_width = (
+            kwargs["tile_overlap_width"] if "tile_overlap_width" in kwargs else 0
+        )
+        # Defaults to no masking
+        mask_filename = kwargs["mask_filename"] if "mask_filename" in kwargs else ""
+        # Defaults to any overlap with the mask
+        mask_threshold = kwargs["mask_threshold"] if "mask_threshold" in kwargs else 0.0
+
+        # Update keys of the dictionary from deprecated names
+        _update_dict(study)
+
         # Check values.
         if not ("version" in study and study["version"] == "version-1"):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
@@ -360,20 +428,20 @@ class TilesByGridAndMask:
                 " must be a non-negative integer or -1."
             )
         if not (
-            isinstance(number_pixel_overlap_rows_for_tile, int)
-            and number_pixel_overlap_rows_for_tile < study["tile_height"]
+            isinstance(tile_overlap_height, int)
+            and tile_overlap_height < study["tile_height"]
         ):
             raise ValueError(
-                f"number_pixel_overlap_rows_for_tile ({number_pixel_overlap_rows_for_tile})"
+                f"tile_overlap_height ({tile_overlap_height})"
                 " must be less than"
                 f' tile_height ({study["tile_height"]}).'
             )
         if not (
-            isinstance(number_pixel_overlap_columns_for_tile, int)
-            and number_pixel_overlap_columns_for_tile < study["tile_width"]
+            isinstance(tile_overlap_width, int)
+            and tile_overlap_width < study["tile_width"]
         ):
             raise ValueError(
-                f"number_pixel_overlap_columns_for_tile ({number_pixel_overlap_columns_for_tile})"
+                f"tile_overlap_width ({tile_overlap_width})"
                 " must be less than"
                 f' tile_width ({study["tile_width"]}).'
             )
@@ -396,10 +464,8 @@ class TilesByGridAndMask:
         self.tile_height = study["tile_height"]
         self.tile_width = study["tile_width"]
         self.randomly_select = randomly_select
-        self.number_pixel_overlap_rows_for_tile = number_pixel_overlap_rows_for_tile
-        self.number_pixel_overlap_columns_for_tile = (
-            number_pixel_overlap_columns_for_tile
-        )
+        self.tile_overlap_height = tile_overlap_height
+        self.tile_overlap_width = tile_overlap_width
         self.mask_filename = mask_filename
         if self.mask_filename != "":
             self.mask_itk = mask_itk
@@ -407,10 +473,13 @@ class TilesByGridAndMask:
 
     def __call__(self, slide):
         """
-        Select tiles according to a regular grid.  Optionally,
-        restrict the list by a mask.  Optionally, select a random
-        subset of them.
+        Select tiles according to a regular grid.  Optionally, restrict the list by a
+        mask.  Optionally, select a random subset of them.
         """
+
+        # Update keys of the dictionary from deprecated names
+        _update_dict(slide)
+
         # Check values.
         if "slide_width" not in slide:
             raise ValueError('slide["slide_width"] must be already set.')
@@ -422,40 +491,37 @@ class TilesByGridAndMask:
         #
         # Do the work.
         #
-        row_stride = self.tile_height - self.number_pixel_overlap_rows_for_tile
-        column_stride = self.tile_width - self.number_pixel_overlap_columns_for_tile
+        row_stride = self.tile_height - self.tile_overlap_height
+        column_stride = self.tile_width - self.tile_overlap_width
 
         # Return information to the user
         slide["slide_height_tiles"] = math.floor(
-            (self.slide_width - self.number_pixel_overlap_rows_for_tile) / row_stride
+            (self.slide_width - self.tile_overlap_height) / row_stride
         )
         slide["slide_width_tiles"] = math.floor(
-            (self.slide_height - self.number_pixel_overlap_columns_for_tile)
-            / column_stride
+            (self.slide_height - self.tile_overlap_width) / column_stride
         )
 
         # Pre-process the mask
         has_mask = hasattr(self, "mask_itk")
         if has_mask:
-            (
-                self.number_pixel_rows_for_mask,
-                self.number_pixel_columns_for_mask,
-            ) = self.mask_itk.shape
-            slide["number_pixel_rows_for_mask"] = self.number_pixel_rows_for_mask
-            slide["number_pixel_columns_for_mask"] = self.number_pixel_columns_for_mask
+            (self.mask_height, self.mask_width) = self.mask_itk.shape
+            slide["mask_height"] = self.mask_height
+            slide["mask_width"] = self.mask_width
 
             # Check that the input and output aspect ratios are pretty close
             if (
                 abs(
                     math.log(
-                        (self.slide_height / self.number_pixel_columns_for_mask)
-                        / (self.slide_width / self.number_pixel_rows_for_mask)
+                        (self.slide_height / self.mask_width)
+                        / (self.slide_width / self.mask_height)
                     )
                 )
                 > 0.20
             ):
                 raise ValueError(
-                    "The mask aspect ratio does not match that for the whole slide image."
+                    "The mask aspect ratio does not match "
+                    "that for the whole slide image."
                 )
 
             # cumulative_mask[row, column] will be the number of mask_itk[r, c] (i.e.,
@@ -467,16 +533,11 @@ class TilesByGridAndMask:
             # are 2^31 (~2 billion = ~ 46k by 46k) or more non-zero pixel values in our
             # mask.
             self.cumulative_mask = np.zeros(
-                (
-                    self.number_pixel_rows_for_mask + 2,
-                    self.number_pixel_columns_for_mask + 2,
-                ),
-                dtype=np.int64,
+                (self.mask_height + 2, self.mask_width + 2), dtype=np.int64
             )
             nonzero = np.vectorize(lambda x: int(x != 0))
             self.cumulative_mask[
-                1 : self.number_pixel_rows_for_mask + 1,
-                1 : self.number_pixel_columns_for_mask + 1,
+                1 : self.mask_height + 1, 1 : self.mask_width + 1
             ] = nonzero(itk.GetArrayViewFromImage(self.mask_itk))
             self.cumulative_mask = np.cumsum(
                 np.cumsum(self.cumulative_mask, axis=0), axis=1
@@ -484,17 +545,14 @@ class TilesByGridAndMask:
 
         # Look at each tile in turn
         tiles = slide["tiles"] = {}
-        number_of_tiles = 0
+        num_tiles = 0
         top_too_high = self.slide_width - self.tile_height + 1
         left_too_high = self.slide_height - self.tile_width + 1
         for top in range(0, top_too_high, row_stride):
             for left in range(0, left_too_high, column_stride):
                 if not (has_mask and self.mask_rejects(top, left)):
-                    tiles[f"tile_{number_of_tiles}"] = {
-                        "tile_top": top,
-                        "tile_left": left,
-                    }
-                number_of_tiles += 1  # Increment even if tile is skipped.
+                    tiles[f"tile_{num_tiles}"] = {"tile_top": top, "tile_left": left}
+                num_tiles += 1  # Increment even if tile is skipped.
 
         # Choose a subset of the tiles randomly
         all_tile_names = tiles.keys()
@@ -529,10 +587,10 @@ class TilesByGridAndMask:
     def mask_rejects(self, top, left):
         bottom = top + self.tile_height
         right = left + self.tile_width
-        mask_top = top * self.number_pixel_rows_for_mask / self.slide_width
-        mask_bottom = bottom * self.number_pixel_rows_for_mask / self.slide_width
-        mask_left = left * self.number_pixel_columns_for_mask / self.slide_height
-        mask_right = right * self.number_pixel_columns_for_mask / self.slide_height
+        mask_top = top * self.mask_height / self.slide_width
+        mask_bottom = bottom * self.mask_height / self.slide_width
+        mask_left = left * self.mask_width / self.slide_height
+        mask_right = right * self.mask_width / self.slide_height
         cumulative_top_left = self.interpolate_cumulative(mask_top, mask_left)
         cumulative_top_right = self.interpolate_cumulative(mask_top, mask_right)
         cumulative_bottom_left = self.interpolate_cumulative(mask_bottom, mask_left)
@@ -556,41 +614,44 @@ class TilesByGridAndMask:
 
 class TilesByList:
     """
-    Select the tiles supplied by the user.  Optionally, select a
-    random subset of them.
+    Select the tiles supplied by the user.  Optionally, select a random subset of them.
 
-    An instance of class TilesByList is a callable that will select
-    the coordinates of tiles to be taken from a slide.  The selected
-    tiles will be written to the slide dictionary.
+    An instance of class TilesByList is a callable that will select the coordinates of
+    tiles to be taken from a slide.  The selected tiles will be written to the slide
+    dictionary.
 
     Parameters for the constructor
     ------------------------------
     study : dictionary
-        The study dictionary from which to read parameters about the
-        study.
+        The study dictionary from which to read parameters about the study.
     randomly_select: int
-        The number of tiles to be randomly selected from the list that
-        would otherwise be written to the slide dictionary.  A value
-        of -1 is the default and means that all tiles should be
-        written.
+        The number of tiles to be randomly selected from the list that would otherwise
+        be written to the slide dictionary.  A value of -1 is the default and means that
+        all tiles should be written.
     tiles_dictionary: dictionary
-        For example, {'AB234': {'tile_top': top0, 'tile_left': left0},
-        'CD43': {'tile_top': top1, 'tile_left': left1}, ...}.  Tiles
-        from this list will copied into the slide dictionary if they
-        are randomly selected.
+        For example, {'AB234': {'tile_top': top0, 'tile_left': left0}, 'CD43':
+        {'tile_top': top1, 'tile_left': left1}, ...}.  Tiles from this list will copied
+        into the slide dictionary if they are randomly selected.
 
     """
 
-    def __init__(
-        self,
-        study,
-        randomly_select=-1,  # Defaults to select all
-        tiles_dictionary={},  # {'AB234': {'tile_top': top0, 'tile_left': left0}, 'CD43': {'tile_top': top1, 'tile_left': left1}, ...}
-    ):
+    def __init__(self, study, randomly_select=-1, tiles_dictionary={}):
         """
-        Sanity check the supplied parameters and store them for later
-        use.
+        Sanity check the supplied parameters and store them for later use.
+
+        randomly_select defaults to "select all".
+
+        For example,
+        tiles_dictionary = {
+            "AB234": {"tile_top": top0, "tile_left": left0},
+            "CD43": {"tile_top": top1, "tile_left": left1},
+            ...
+        }
         """
+
+        # Update keys of the dictionary from deprecated names
+        _update_dict(study)
+
         # Check values
         if not ("version" in study and study["version"] == "version-1"):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
@@ -615,9 +676,13 @@ class TilesByList:
                 f"randomly_select ({randomly_select})"
                 " must be a non-negative integer or -1."
             )
+        if not isinstance(tiles_dictionary, dict):
+            raise ValueError("tiles_dictionary must be dictionary.")
+        for tile_corner in tiles_dictionary.values():
+            # Update keys of the dictionary from deprecated names
+            _update_dict(tile_corner)
         if not (
-            isinstance(tiles_dictionary, dict)
-            and all(
+            all(
                 [
                     isinstance(tile_corner, dict)
                     for tile_corner in tiles_dictionary.values()
@@ -662,8 +727,8 @@ class TilesByList:
 
     def __call__(self, slide):
         """
-        Select the tiles supplied by the user.  Optionally, select a
-        random subset of them.
+        Select the tiles supplied by the user.  Optionally, select a random subset of
+        them.
         """
         tiles = slide["tiles"] = copy.deepcopy(
             self.tiles_dictionary
@@ -681,26 +746,28 @@ class TilesRandomly:
     """
     Select a random subset of all possible tiles.
 
-    An instance of class TilesRandomly is a callable that will select
-    the coordinates of tiles to be taken from a slide.  The selected
-    tiles will be written to the slide dictionary.
+    An instance of class TilesRandomly is a callable that will select the coordinates of
+    tiles to be taken from a slide.  The selected tiles will be written to the slide
+    dictionary.
 
     Parameters for the constructor
     ------------------------------
     study : dictionary
-        The study dictionary from which to read parameters about the
-        study.
+        The study dictionary from which to read parameters about the study.
     randomly_select: int
-        The number of tiles to be randomly selected from the slide.
-        The value must be positive.  A value of 1 is the default.
+        The number of tiles to be randomly selected from the slide.  The value must be
+        positive.  A value of 1 is the default.
 
     """
 
     def __init__(self, study, randomly_select=1):  # Defaults to select one
         """
-        Sanity check the supplied parameters and store them for later
-        use.
+        Sanity check the supplied parameters and store them for later use.
         """
+
+        # Update keys of the dictionary from deprecated names
+        _update_dict(study)
+
         # Check values.
         if not ("version" in study and study["version"] == "version-1"):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
@@ -735,6 +802,10 @@ class TilesRandomly:
         """
         Select a random subset of all possible tiles.
         """
+
+        # Update keys of the dictionary from deprecated names
+        _update_dict(slide)
+
         if "slide_width" not in slide:
             raise ValueError('slide["slide_width"] must be already set.')
         if "slide_height" not in slide:
@@ -747,7 +818,179 @@ class TilesRandomly:
             for _ in range(self.randomly_select)
         ]
         tiles = slide["tiles"] = {}
-        number_of_tiles = 0
-        for (row, column) in row_column_list:
-            tiles[f"tile_{number_of_tiles}"] = {"tile_top": row, "tile_left": column}
-            number_of_tiles += 1
+        num_tiles = 0
+        for row, column in row_column_list:
+            tiles[f"tile_{num_tiles}"] = {"tile_top": row, "tile_left": column}
+            num_tiles += 1
+
+
+class ChunkLocations:
+    def __call__(self, study_description):
+        """
+        Given the list of desired tile locations, computes the locations of chunks to be
+        read
+        """
+
+        # Update keys of the dictionary from deprecated names
+        _update_dict(study_description)
+
+        if not (
+            "version" in study_description
+            and study_description["version"] == "version-1"
+        ):
+            raise ValueError(
+                'study_description["version"] must exist and be equal to "version-1".'
+            )
+        if not (
+            "tile_height" in study_description
+            and isinstance(study_description["tile_height"], int)
+            and study_description["tile_height"] > 0
+        ):
+            raise ValueError(
+                'study_description["tile_height"]'
+                " must exist and be a positive integer"
+            )
+        if not (
+            "tile_width" in study_description
+            and isinstance(study_description["tile_width"], int)
+            and study_description["tile_width"] > 0
+        ):
+            raise ValueError(
+                'study_description["tile_width"]'
+                " must exist and be a positive integer"
+            )
+        for slide in study_description["slides"].values():
+            # Update keys of the dictionary from deprecated names
+            _update_dict(slide)
+
+            if not (
+                "returned_magnification" in slide
+                and isinstance(slide["returned_magnification"], (int, float))
+                and slide["returned_magnification"] > 0
+            ):
+                raise ValueError(
+                    'slide["returned_magnification"]'
+                    " must exist and be a positive number"
+                )
+        # Check that other necessary keys are also present!!!
+
+        # Partition the set of tiles into chunks.
+        self._designate_chunks_for_tiles(study_description)
+        # cProfile.runctx(
+        #     "self._designate_chunks_for_tiles(study_description)",
+        #     globals=globals(),
+        #     locals=locals(),
+        #     sort="cumulative",
+        # )
+        # print("_designate_chunks_for_tiles done")
+
+    def _designate_chunks_for_tiles(self, study_description):
+        # Update keys of the dictionary from deprecated names
+        _update_dict(study_description)
+
+        tile_height = study_description["tile_height"]
+        tile_width = study_description["tile_width"]
+
+        for slide in study_description["slides"].values():
+            # Update keys of the dictionary from deprecated names
+            _update_dict(slide)
+
+            if not (
+                "chunk_height" in slide
+                and isinstance(slide["chunk_height"], int)
+                and slide["chunk_height"] > 0
+            ):
+                raise ValueError(
+                    'slide["chunk_height"]' " must exist and be a positive integer"
+                )
+            if not (
+                "chunk_width" in slide
+                and isinstance(slide["chunk_width"], int)
+                and slide["chunk_width"] > 0
+            ):
+                raise ValueError(
+                    'slide["chunk_width"]' " must exist and be a positive integer"
+                )
+            chunk_height = slide["chunk_height"]
+            chunk_width = slide["chunk_width"]
+
+            tiles_as_sorted_list = list(slide["tiles"].items())
+            tiles_as_sorted_list.sort(
+                key=lambda x: x[1]["tile_left"]
+            )  # second priority key
+            tiles_as_sorted_list.sort(
+                key=lambda x: x[1]["tile_top"]
+            )  # first priority key
+            chunks = slide["chunks"] = {}
+            num_chunks = 0
+            while len(tiles_as_sorted_list) > 0:
+                tile = tiles_as_sorted_list[0]
+                chunk = chunks[f"chunk_{num_chunks}"] = {
+                    "chunk_top": tile[1]["tile_top"],
+                    "chunk_left": tile[1]["tile_left"],
+                    "chunk_bottom": tile[1]["tile_top"] + chunk_height,
+                    "chunk_right": tile[1]["tile_left"] + chunk_width,
+                }
+                num_chunks += 1
+
+                # This implementation has a run time that is quadratic in the number of
+                # tiles that a slide has.  It is too slow; we should make it faster.
+                tiles = chunk["tiles"] = {}
+                subsequent_chunks = []
+                for tile in tiles_as_sorted_list:
+                    if (
+                        tile[1]["tile_top"] + tile_height <= chunk["chunk_bottom"]
+                        and tile[1]["tile_left"] + tile_width <= chunk["chunk_right"]
+                        and tile[1]["tile_left"] >= chunk["chunk_left"]
+                        and tile[1]["tile_top"] >= chunk["chunk_top"]
+                    ):
+                        tiles[tile[0]] = tile[1]
+                    else:
+                        subsequent_chunks.append(tile)
+
+                # Update the list of tiles that are not yet in chunks
+                tiles_as_sorted_list = subsequent_chunks
+
+                # Make the chunk as small as possible given the tiles that it must
+                # support.  Note that this also ensures that the pixels that are read do
+                # not run over the bottom or right border of the slide (assuming that
+                # the tiles do not go over those borders).
+                chunk["chunk_top"] = min([tile["tile_top"] for tile in tiles.values()])
+                chunk["chunk_left"] = min(
+                    [tile["tile_left"] for tile in tiles.values()]
+                )
+                chunk["chunk_bottom"] = (
+                    max([tile["tile_top"] for tile in tiles.values()]) + tile_height
+                )
+                chunk["chunk_right"] = (
+                    max([tile["tile_left"] for tile in tiles.values()]) + tile_width
+                )
+
+    @staticmethod
+    def read_large_image(
+        filename,
+        chunk_top,
+        chunk_left,
+        chunk_bottom,
+        chunk_right,
+        returned_magnification,
+    ):
+        import large_image
+
+        ts = large_image.open(filename)
+        chunk = ts.getRegion(
+            scale=dict(magnification=returned_magnification),
+            format=large_image.constants.TILE_FORMAT_NUMPY,
+            region=dict(
+                left=chunk_left,
+                top=chunk_top,
+                width=chunk_right - chunk_left,
+                height=chunk_bottom - chunk_top,
+                units="mag_pixels",
+            ),
+        )[0]
+        return chunk
+
+    @staticmethod
+    def scale_it(value, factor):
+        return math.floor(value / factor + 0.01)
