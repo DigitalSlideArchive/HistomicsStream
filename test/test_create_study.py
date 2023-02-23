@@ -66,10 +66,7 @@ def test_create_study():
     # Demonstrate TilesByGridAndMask without a mask
     my_study_by_grid = copy.deepcopy(my_study0)
     tiles_by_grid = hs.configure.TilesByGridAndMask(
-        my_study_by_grid,
-        tile_overlap_height=32,
-        tile_overlap_width=32,
-        randomly_select=100,
+        my_study_by_grid, overlap_height=32, overlap_width=32, randomly_select=100
     )
     # We could apply this to a subset of the slides, but we will apply it to all slides
     # in this example.
@@ -82,8 +79,8 @@ def test_create_study():
         my_study_by_grid_and_mask = copy.deepcopy(my_study0)
         tiles_by_grid_and_mask = hs.configure.TilesByGridAndMask(
             my_study_by_grid_and_mask,
-            tile_overlap_height=0,
-            tile_overlap_width=0,
+            overlap_height=0,
+            overlap_width=0,
             mask_filename="/tf/notebooks/histomics_stream/example/TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913-mask.png",
             randomly_select=100,
         )
