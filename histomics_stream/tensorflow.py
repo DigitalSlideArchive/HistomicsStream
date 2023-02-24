@@ -47,7 +47,7 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
         }
         # print("study_as_tensors done")
 
-        num_chunks = 0
+        chunk_list = list()
         for slide_description in study_description["slides"].values():
             slide_as_tensors = {
                 **study_as_tensors,
@@ -86,11 +86,10 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
 
                 # Make a tensorflow Dataset from this chunk.
                 chunk_dataset = tf.data.Dataset.from_tensor_slices(chunk_as_tensors)
-                if num_chunks == 0:
-                    study_dataset = chunk_dataset
-                else:
-                    study_dataset = study_dataset.concatenate(chunk_dataset)
-                num_chunks += 1
+                chunk_list.append(chunk_dataset)
+
+        study_dataset = self._concatenate_list(chunk_list)
+        del chunk_list
 
         # We have accumulated the chunk datasets into a study_dataset where each element
         # is a chunk.  Read in the chunk pixel data and split it into tiles.
@@ -109,9 +108,56 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
             lambda elem: ((elem.pop("tile_pixels"), elem), None, None),
             **self.dataset_map_options,
         )
-        # print("pop done")
-
+        # print("elem.pop done")
         return study_dataset
+
+    def _concatenate_list(self, dataset_list):
+        # We will need to call tf.Dataset.concatenate multiple times to combine all the
+        # datasets in this list.  In theory, we have several options.
+
+        # #1) We can scan the list from start to end and append each dataset as we
+        # encounter it.  This means that the concatenate calls will be left-heavy; each
+        # will have many datasets on the left, but only one dataset on the right.
+        #     response = None
+        #     for dataset in dataset_list:
+        #         if response is None:
+        #             response = dataset
+        #         else:
+        #             response = response.concatenate(dataset)
+        #     return response
+
+        # #2) We can scan the list from end to start and pre-pend each dataset as we
+        # encouter it.  This means that the concatenate calls will be right-heavy; they
+        # will have many datasets on the right, but only one dataset on the left.
+        #     response = None
+        #     for dataset in reversed(dataset_list):
+        #         if response is None:
+        #             response = dataset
+        #         else:
+        #             response = dataset.concatenate(response)
+        #     return response
+
+        # #3) We can do a recursive, divide-and-conquer approach so that each
+        # concatenate call will have approximately equally many datasets on the left and
+        # right.
+        length = len(dataset_list)
+        if length == 1:
+            return dataset_list[0]
+        if length > 1:
+            return self._concatenate_list(dataset_list[0 : length // 2]).concatenate(
+                self._concatenate_list(dataset_list[length // 2 : length])
+            )
+        return None
+        # We chose the divide-and-conquer approach because it should work most
+        # generally.  The downside of the left-heavy approach is that finding the first
+        # dataset requires descending through all concatenate calls.  This can overload
+        # system resources at the time of a predict(combined_dataset) call and kill the
+        # process.  The right-heavy approach does not have this problem unless there is
+        # some sort of aggressive shuffling going on, in which case many resources could
+        # be required to find a single dataset.  The balanced, divide-and-conquer
+        # approach should work well even with shuffling, though it could be a little
+        # slower than the right-heavy approach in the case of predicting the datasets in
+        # a simple forward order.
 
     @tf.function
     def _read_and_split_chunk(self, elem):
