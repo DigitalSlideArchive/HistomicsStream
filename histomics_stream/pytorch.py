@@ -43,17 +43,18 @@ from . import configure
 
 
 class CreateTorchDataloader(configure.ChunkLocations):
-    class MyDataset(torch.utils.data.IterableDataset):
+    class MyDataset(torch.utils.data.IterableDataset, configure._TilesByCommon):
         def __init__(self, study_description):
+            configure._TilesByCommon.__init__(self)
             """Store in self the data or pointers to it"""
             # Update keys of the dictionary from deprecated names
-            configure._update_dict(study_description)
+            self._update_dict(study_description)
             for slide_description in study_description["slides"].values():
-                configure._update_dict(slide_description)
+                self._update_dict(slide_description)
                 for chunk_description in slide_description["chunks"].values():
-                    configure._update_dict(chunk_description)
+                    self._update_dict(chunk_description)
                     for tile_description in chunk_description["tiles"].values():
-                        configure._update_dict(tile_description)
+                        self._update_dict(tile_description)
 
             self.study_description = study_description
 
@@ -176,6 +177,7 @@ class CreateTorchDataloader(configure.ChunkLocations):
 
     def __init__(self):
         """Set global options"""
+        configure.ChunkLocations.__init__(self)
         # !!! Instead, get `batch_size` from somewhere
         self.batch_size = 1
 

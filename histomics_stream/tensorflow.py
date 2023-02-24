@@ -26,6 +26,7 @@ from . import configure
 
 class CreateTensorFlowDataset(configure.ChunkLocations):
     def __init__(self):
+        configure.ChunkLocations.__init__(self)
         self.dataset_map_options = {
             "num_parallel_calls": tf.data.experimental.AUTOTUNE,
             "deterministic": False,
