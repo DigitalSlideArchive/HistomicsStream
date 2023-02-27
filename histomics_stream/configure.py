@@ -25,49 +25,69 @@ import numpy as np
 import random
 import re
 
-# Map old key names to their current equivalent
-_key_mapping = {
-    "number_pixel_columns_for_chunk": "chunk_width",
-    "number_pixel_columns_for_mask": "mask_width",
-    "number_pixel_columns_for_slide": "slide_height",
-    "number_pixel_columns_for_tile": "tile_width",
-    "number_pixel_overlap_columns_for_tile": "tile_overlap_width",
-    "number_pixel_overlap_rows_for_tile": "tile_overlap_height",
-    "number_pixel_rows_for_chunk": "chunk_height",
-    "number_pixel_rows_for_mask": "mask_height",
-    "number_pixel_rows_for_slide": "slide_width",
-    "number_pixel_rows_for_tile": "tile_height",
-    "number_tile_columns_for_slide": "slide_width_tiles",
-    "number_tile_rows_for_slide": "slide_height_tiles",
-}
 
+class _TilesByCommon:
+    def __init__(self):
+        self._key_mapping = {
+            "number_pixel_columns_for_chunk": "chunk_width",
+            "number_pixel_columns_for_mask": "mask_width",
+            "number_pixel_columns_for_slide": "slide_height",
+            "number_pixel_columns_for_tile": "tile_width",
+            "number_pixel_overlap_columns_for_tile": "tile_overlap_width",
+            "number_pixel_overlap_rows_for_tile": "tile_overlap_height",
+            "number_pixel_rows_for_chunk": "chunk_height",
+            "number_pixel_rows_for_mask": "mask_height",
+            "number_pixel_rows_for_slide": "slide_width",
+            "number_pixel_rows_for_tile": "tile_height",
+            "number_tile_columns_for_slide": "slide_width_tiles",
+            "number_tile_rows_for_slide": "slide_height_tiles",
+            "tile_overlap_height": "overlap_height",
+            "tile_overlap_width": "overlap_width",
+        }
 
-_keys_warned = set()
+        self._keys_warned = set()
 
-
-def _update_dict(d):
-    for old_key in d.keys() & _key_mapping.keys():
-        # An old key is in use in `d`.
-        new_key = _key_mapping[old_key]
-        if new_key in d:
-            # Both the old and new key are used.
-            raise ValueError(
-                f"Cannot use both {repr(old_key)} key (deprecated) "
-                f"and its replacement {repr(new_key)}"
+    # For each filename, select just upper-left corner for each tile.
+    # Note that each upper-left corner is returned as (top, left), not (left, top).
+    def get_tiles(self, study):
+        return [
+            (
+                slide["filename"],
+                [
+                    (tile["tile_top"], tile["tile_left"])
+                    for tile in slide["tiles"].values()
+                ],
             )
-        if old_key not in _keys_warned:
-            print(
-                f"Warning: updating deprecated key {repr(old_key)} "
-                f"to new name {repr(new_key)}"
-            )
-            # Comment out the next line so we do have repeated warnings, in case a
-            # second study comes in with deprecated keys.
-            # _keys_warned.add(old_key)
-        d[new_key] = d[old_key]
-        del d[old_key]
+            for slide in study["slides"].values()
+        ]
+
+    # Private function to map old key names to their current equivalent
+    def _update_dict(self, d):
+        for old_key in d.keys() & self._key_mapping.keys():
+            # An old key is in use in `d`.
+            new_key = self._key_mapping[old_key]
+            while new_key in self._key_mapping:
+                # Multiple, serial name changes
+                new_key = self._key_mapping[new_key]
+            if new_key in d:
+                # Both the old and new key are used.
+                raise ValueError(
+                    f"Cannot use both {repr(old_key)} key (deprecated) "
+                    f"and its replacement {repr(new_key)}"
+                )
+            if old_key not in self._keys_warned:
+                print(
+                    f"Warning: updating deprecated key {repr(old_key)} "
+                    f"to new name {repr(new_key)}"
+                )
+                # Comment out the next line so we do have repeated warnings, in case a
+                # second study comes in with deprecated keys.
+                # self._keys_warned.add(old_key)
+            d[new_key] = d[old_key]
+            del d[old_key]
 
 
-class FindResolutionForSlide:
+class FindResolutionForSlide(_TilesByCommon):
     """
     A class that computes read parameters for slides.
 
@@ -119,6 +139,7 @@ class FindResolutionForSlide:
         """
         Sanity check the supplied parameters and store them for later use.
         """
+        _TilesByCommon.__init__(self)
         # Check values.
         if not ("version" in study and study["version"] == "version-1"):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
@@ -329,7 +350,7 @@ class FindResolutionForSlide:
         return level, returned_magnification
 
 
-class TilesByGridAndMask:
+class TilesByGridAndMask(_TilesByCommon):
     """
     Select tiles according to a regular grid.  Optionally, restrict the list by a mask
     that is read from a file.  Optionally, further select a random subset of them.
@@ -346,14 +367,18 @@ class TilesByGridAndMask:
         The number of tiles to be randomly selected from the list that would otherwise
         be written to the slide dictionary.  A value of -1 is the default and means that
         all tiles should be written.
-    tile_overlap_height
-        Specifies the desired amount of vertical overlap (measured in rows of pixels)
-        between adjacent tiles.  This defaults to 0, which means that there is no
-        overlap between adjacent tiles; they are abutting.
-    tile_overlap_width
-        Specifies the desired amount of horizontal overlap (measured in columns of
-        pixels) between adjacent tiles.  This defaults to 0, which means that there is
-        no overlap between adjacent tiles; they are abutting.
+    overlap_height
+        Specifies the desired amount of vertical overlap between adjacent tiles,
+        measured in pixels using the `target_magnification`.  If overlap_height is not
+        supplied, it is read from the study dictionary, if available, otherwise it is
+        set to zero.  Zero indicates that there is no overlap between adjacent tiles;
+        they are abutting.
+    overlap_width
+        Specifies the desired amount of horizontal overlap between adjacent tiles,
+        measured in pixels using the `target_magnification`.  If overlap_width is not
+        supplied, it is read from the study dictionary, if available, otherwise it is
+        set to zero.  Zero indicates that there is no overlap between adjacent tiles;
+        they are abutting.
     mask_filename: string
         The path of the image file to be read and used as a mask.  The aspect ratio of
         the mask (in terms of its pixel dimensions) is expected to be about the same as
@@ -370,12 +395,13 @@ class TilesByGridAndMask:
         """
         Sanity check the supplied parameters and store them for later use.
         """
+        _TilesByCommon.__init__(self)
         # Update keys of the dictionary from deprecated names
-        _update_dict(kwargs)
+        self._update_dict(kwargs)
         bad_keys = kwargs.keys() - {
             "randomly_select",
-            "tile_overlap_height",
-            "tile_overlap_width",
+            "overlap_height",
+            "overlap_width",
             "mask_filename",
             "mask_threshold",
         }
@@ -388,20 +414,30 @@ class TilesByGridAndMask:
         randomly_select = (
             kwargs["randomly_select"] if "randomly_select" in kwargs else -1
         )
-        # Defaults to no overlap
-        tile_overlap_height = (
-            kwargs["tile_overlap_height"] if "tile_overlap_height" in kwargs else 0
-        )
-        tile_overlap_width = (
-            kwargs["tile_overlap_width"] if "tile_overlap_width" in kwargs else 0
-        )
         # Defaults to no masking
         mask_filename = kwargs["mask_filename"] if "mask_filename" in kwargs else ""
         # Defaults to any overlap with the mask
         mask_threshold = kwargs["mask_threshold"] if "mask_threshold" in kwargs else 0.0
 
         # Update keys of the dictionary from deprecated names
-        _update_dict(study)
+        self._update_dict(study)
+
+        # If overlap is not supplied, it is read from the study dictionary, if
+        # available, otherwise it is set to zero, which is no overlap.
+        overlap_height = (
+            kwargs["overlap_height"]
+            if "overlap_height" in kwargs
+            else study["overlap_height"]
+            if "overlap_height" in study
+            else 0
+        )
+        overlap_width = (
+            kwargs["overlap_width"]
+            if "overlap_width" in kwargs
+            else study["overlap_width"]
+            if "overlap_width" in study
+            else 0
+        )
 
         # Check values.
         if not ("version" in study and study["version"] == "version-1"):
@@ -428,20 +464,16 @@ class TilesByGridAndMask:
                 " must be a non-negative integer or -1."
             )
         if not (
-            isinstance(tile_overlap_height, int)
-            and tile_overlap_height < study["tile_height"]
+            isinstance(overlap_height, int) and overlap_height < study["tile_height"]
         ):
             raise ValueError(
-                f"tile_overlap_height ({tile_overlap_height})"
+                f"overlap_height ({overlap_height})"
                 " must be less than"
                 f' tile_height ({study["tile_height"]}).'
             )
-        if not (
-            isinstance(tile_overlap_width, int)
-            and tile_overlap_width < study["tile_width"]
-        ):
+        if not (isinstance(overlap_width, int) and overlap_width < study["tile_width"]):
             raise ValueError(
-                f"tile_overlap_width ({tile_overlap_width})"
+                f"overlap_width ({overlap_width})"
                 " must be less than"
                 f' tile_width ({study["tile_width"]}).'
             )
@@ -464,12 +496,20 @@ class TilesByGridAndMask:
         self.tile_height = study["tile_height"]
         self.tile_width = study["tile_width"]
         self.randomly_select = randomly_select
-        self.tile_overlap_height = tile_overlap_height
-        self.tile_overlap_width = tile_overlap_width
+        self.overlap_height = overlap_height
+        self.overlap_width = overlap_width
         self.mask_filename = mask_filename
         if self.mask_filename != "":
             self.mask_itk = mask_itk
         self.mask_threshold = mask_threshold
+        # If the user hasn't put the overlap information into the top-level study
+        # dictionary then place it there.
+        if "overlap_height" not in study:
+            study["overlap_height"] = self.overlap_height
+        if "overlap_width" not in study:
+            study["overlap_width"] = self.overlap_width
+        self.studywide_overlap_height = study["overlap_height"]
+        self.studywide_overlap_width = study["overlap_width"]
 
     def __call__(self, slide):
         """
@@ -478,7 +518,7 @@ class TilesByGridAndMask:
         """
 
         # Update keys of the dictionary from deprecated names
-        _update_dict(slide)
+        self._update_dict(slide)
 
         # Check values.
         if "slide_width" not in slide:
@@ -488,18 +528,21 @@ class TilesByGridAndMask:
             raise ValueError('slide["slide_height"] must be already set.')
 
         self.slide_height = slide["slide_height"]
+
+        slide["overlap_height"] = self.overlap_height
+        slide["overlap_width"] = self.overlap_width
         #
         # Do the work.
         #
-        row_stride = self.tile_height - self.tile_overlap_height
-        column_stride = self.tile_width - self.tile_overlap_width
+        row_stride = self.tile_height - self.overlap_height
+        column_stride = self.tile_width - self.overlap_width
 
         # Return information to the user
         slide["slide_height_tiles"] = math.floor(
-            (self.slide_width - self.tile_overlap_height) / row_stride
+            (self.slide_width - self.overlap_height) / row_stride
         )
         slide["slide_width_tiles"] = math.floor(
-            (self.slide_height - self.tile_overlap_width) / column_stride
+            (self.slide_height - self.overlap_width) / column_stride
         )
 
         # Pre-process the mask
@@ -612,7 +655,7 @@ class TilesByGridAndMask:
             return cumulative < 0.000001
 
 
-class TilesByList:
+class TilesByList(_TilesByCommon):
     """
     Select the tiles supplied by the user.  Optionally, select a random subset of them.
 
@@ -648,9 +691,10 @@ class TilesByList:
             ...
         }
         """
+        _TilesByCommon.__init__(self)
 
         # Update keys of the dictionary from deprecated names
-        _update_dict(study)
+        self._update_dict(study)
 
         # Check values
         if not ("version" in study and study["version"] == "version-1"):
@@ -680,7 +724,7 @@ class TilesByList:
             raise ValueError("tiles_dictionary must be dictionary.")
         for tile_corner in tiles_dictionary.values():
             # Update keys of the dictionary from deprecated names
-            _update_dict(tile_corner)
+            self._update_dict(tile_corner)
         if not (
             all(
                 [
@@ -742,7 +786,7 @@ class TilesByList:
                 del tiles[key]
 
 
-class TilesRandomly:
+class TilesRandomly(_TilesByCommon):
     """
     Select a random subset of all possible tiles.
 
@@ -764,9 +808,10 @@ class TilesRandomly:
         """
         Sanity check the supplied parameters and store them for later use.
         """
+        _TilesByCommon.__init__(self)
 
         # Update keys of the dictionary from deprecated names
-        _update_dict(study)
+        self._update_dict(study)
 
         # Check values.
         if not ("version" in study and study["version"] == "version-1"):
@@ -804,7 +849,7 @@ class TilesRandomly:
         """
 
         # Update keys of the dictionary from deprecated names
-        _update_dict(slide)
+        self._update_dict(slide)
 
         if "slide_width" not in slide:
             raise ValueError('slide["slide_width"] must be already set.')
@@ -824,7 +869,10 @@ class TilesRandomly:
             num_tiles += 1
 
 
-class ChunkLocations:
+class ChunkLocations(_TilesByCommon):
+    def __init__(self):
+        _TilesByCommon.__init__(self)
+
     def __call__(self, study_description):
         """
         Given the list of desired tile locations, computes the locations of chunks to be
@@ -832,7 +880,7 @@ class ChunkLocations:
         """
 
         # Update keys of the dictionary from deprecated names
-        _update_dict(study_description)
+        self._update_dict(study_description)
 
         if not (
             "version" in study_description
@@ -861,7 +909,7 @@ class ChunkLocations:
             )
         for slide in study_description["slides"].values():
             # Update keys of the dictionary from deprecated names
-            _update_dict(slide)
+            self._update_dict(slide)
 
             if not (
                 "returned_magnification" in slide
@@ -886,14 +934,14 @@ class ChunkLocations:
 
     def _designate_chunks_for_tiles(self, study_description):
         # Update keys of the dictionary from deprecated names
-        _update_dict(study_description)
+        self._update_dict(study_description)
 
         tile_height = study_description["tile_height"]
         tile_width = study_description["tile_width"]
 
         for slide in study_description["slides"].values():
             # Update keys of the dictionary from deprecated names
-            _update_dict(slide)
+            self._update_dict(slide)
 
             if not (
                 "chunk_height" in slide

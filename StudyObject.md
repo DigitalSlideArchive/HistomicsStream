@@ -14,6 +14,10 @@ Those keys that are fixed strings are in bold.  The keys whose values are set di
   How high is each tile, measured in pixels using the `target_magnification` (described below).
 + ***tile_width*** (int):
   How wide is each tile, measured in pixels using the `target_magnification` (described below).
++ ***overlap_height*** (int):
+  Specifies the desired amount of vertical overlap between adjacent tiles, measured in pixels using the `target_magnification` (described below).  If overlap_height is not supplied, it is set to zero.  Zero indicates that there is no overlap between adjacent tiles; they are abutting.
++ ***overlap_width*** (int):
+  Specifies the desired amount of horizontal overlap between adjacent tiles, measured in pixels using the `target_magnification` (described below).  If overlap_width is not supplied, it is set to zero.  Zero indicates that there is no overlap between adjacent tiles; they are abutting.
 + ***slides*** (Python dict):
   Contains information about the study's slides.  The distinct keys of this Python dict are set by the user for their own convenience, one per slide.
   + *user-selected key for slide* (Python dict):
@@ -92,11 +96,11 @@ Those keys that are fixed strings are in bold.  The keys whose values are set di
 + ***randomly_select*** (int):
     The number of tiles to be randomly selected from the list that would otherwise be written to the Python dict for this slide.  A value of `-1` is the default and means that all tiles should be written, except that the default is `+1` for `TilesRandomly`.
 
-+ ***tile_overlap_height*** (int):
-    Specifies the desired amount of vertical overlap between adjacent tiles, measured in pixels using the `target_magnification` (described above).  This defaults to 0, which means that there is no overlap between adjacent tiles; they are abutting.
++ ***overlap_height*** (int):
+    Specifies the desired amount of vertical overlap between adjacent tiles, measured in pixels using the `target_magnification` (described above).  If overlap_height is not supplied, it is read from the study dictionary, if available, otherwise it is set to zero.  Zero indicates that there is no overlap between adjacent tiles; they are abutting.
 
-+ ***tile_overlap_width*** (int):
-    Specifies the desired amount of horizontal overlap between adjacent tiles, measured in pixels using the `target_magnification` (described above).  This defaults to 0, which means that there is no overlap between adjacent tiles; they are abutting.
++ ***overlap_width*** (int):
+     Specifies the desired amount of horizontal overlap between adjacent tiles, measured in pixels using the `target_magnification` (described above).  If overlap_width is not supplied, it is read from the study dictionary, if available, otherwise it is set to zero.  Zero indicates that there is no overlap between adjacent tiles; they are abutting.
 
 + ***mask_filename*** (str):
     The path of the image file to be read and used as a mask.  The aspect ratio of the mask (in terms of its pixel dimensions) is expected to be about the same as the aspect ratio of the main image ( in terms of its grid of tiles).  A non-zero value in the mask indicates that the tile should be retained.  The default is "", which means that there is no masking.
