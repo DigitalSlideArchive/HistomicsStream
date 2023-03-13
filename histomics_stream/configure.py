@@ -19,6 +19,7 @@
 """Whole-slide image streamer for machine learning frameworks."""
 
 import copy
+import datetime
 import itk
 import math
 import numpy as np
@@ -872,6 +873,7 @@ class TilesRandomly(_TilesByCommon):
 class ChunkLocations(_TilesByCommon):
     def __init__(self):
         _TilesByCommon.__init__(self)
+        self.no_indices = np.array((), dtype=np.int64)
 
     def __call__(self, study_description):
         """
@@ -930,7 +932,6 @@ class ChunkLocations(_TilesByCommon):
         #     locals=locals(),
         #     sort="cumulative",
         # )
-        # print("_designate_chunks_for_tiles done")
 
     def _designate_chunks_for_tiles(self, study_description):
         # Update keys of the dictionary from deprecated names
@@ -962,43 +963,42 @@ class ChunkLocations(_TilesByCommon):
             chunk_height = slide["chunk_height"]
             chunk_width = slide["chunk_width"]
 
-            tiles_as_sorted_list = list(slide["tiles"].items())
-            tiles_as_sorted_list.sort(
-                key=lambda x: x[1]["tile_left"]
-            )  # second priority key
-            tiles_as_sorted_list.sort(
-                key=lambda x: x[1]["tile_top"]
-            )  # first priority key
+            tiles_names = list(slide["tiles"].keys())
+            tiles_data = np.array(
+                [
+                    [
+                        slide["tiles"][tile]["tile_top"],
+                        slide["tiles"][tile]["tile_left"],
+                    ]
+                    for tile in tiles_names
+                ],
+                dtype=np.int64,
+            )
+            self.build_tree(tiles_data)
             chunks = slide["chunks"] = {}
             num_chunks = 0
-            while len(tiles_as_sorted_list) > 0:
-                tile = tiles_as_sorted_list[0]
+            while self.get_tree() is not None:
+                tile = self.get_topmost()
                 chunk = chunks[f"chunk_{num_chunks}"] = {
-                    "chunk_top": tile[1]["tile_top"],
-                    "chunk_left": tile[1]["tile_left"],
-                    "chunk_bottom": tile[1]["tile_top"] + chunk_height,
-                    "chunk_right": tile[1]["tile_left"] + chunk_width,
+                    "chunk_top": tiles_data[0],
+                    "chunk_left": tiles_data[1],
+                    "chunk_bottom": tiles_data[0] + chunk_height,
+                    "chunk_right": tiles_data[1] + chunk_width,
                 }
                 num_chunks += 1
 
-                # This implementation has a run time that is quadratic in the number of
-                # tiles that a slide has.  It is too slow; we should make it faster.
-                tiles = chunk["tiles"] = {}
-                subsequent_chunks = []
-                for tile in tiles_as_sorted_list:
-                    if (
-                        tile[1]["tile_top"] + tile_height <= chunk["chunk_bottom"]
-                        and tile[1]["tile_left"] + tile_width <= chunk["chunk_right"]
-                        and tile[1]["tile_left"] >= chunk["chunk_left"]
-                        and tile[1]["tile_top"] >= chunk["chunk_top"]
-                    ):
-                        tiles[tile[0]] = tile[1]
-                    else:
-                        subsequent_chunks.append(tile)
-
-                # Update the list of tiles that are not yet in chunks
-                tiles_as_sorted_list = subsequent_chunks
-
+                mins = tile.copy()
+                maxs = tile.copy()
+                maxs[0] += chunk_height - tile_height + 1
+                maxs[1] += chunk_width - tile_width + 1
+                indices = self.find_in_range_and_delete(mins, maxs)
+                tiles = chunk["tiles"] = {
+                    tiles_names[i]: {
+                        "tile_top": tiles_data[i][0],
+                        "tile_left": tiles_data[i][1],
+                    }
+                    for i in indices
+                }
                 # Make the chunk as small as possible given the tiles that it must
                 # support.  Note that this also ensures that the pixels that are read do
                 # not run over the bottom or right border of the slide (assuming that
@@ -1024,8 +1024,15 @@ class ChunkLocations(_TilesByCommon):
         returned_magnification,
     ):
         import large_image
+        import large_image_source_tiff as large_image_source
 
-        ts = large_image.open(filename)
+        # if "_num_chunks" not in ChunkLocations.read_large_image.__dict__:
+        #     ChunkLocations.read_large_image._num_chunks = 0
+        # chunk_name = f"{ChunkLocations.read_large_image._num_chunks:06}"
+        # ChunkLocations.read_large_image._num_chunks += 1
+
+        # print(f"#{chunk_name} started {datetime.datetime.now()}")
+        ts = large_image_source.open(filename)
         chunk = ts.getRegion(
             scale=dict(magnification=returned_magnification),
             format=large_image.constants.TILE_FORMAT_NUMPY,
@@ -1037,8 +1044,103 @@ class ChunkLocations(_TilesByCommon):
                 units="mag_pixels",
             ),
         )[0]
+        # print(f"#{chunk_name} done {datetime.datetime.now()}")
         return chunk
 
     @staticmethod
     def scale_it(value, factor):
         return math.floor(value / factor + 0.01)
+
+    def build_tree(self, data):
+        self.data = data
+        self.tree = self._build(np.arange(self.data.shape[0]))
+
+    def get_data(self):
+        return self.data
+
+    def get_tree(self):
+        return self.tree
+
+    def get_topmost(self):
+        return self.tree["topmost"]
+
+    def find_in_range_and_delete(self, mins, maxs):
+        self.mins = mins
+        self.maxs = maxs
+        indices, newtree = self._find_in_range_and_delete(subtree=self.tree)
+        self.tree = newtree
+        return indices
+
+    def _build(self, indices):
+        # Split this subset of the data based upon its coordinate means
+        subset = self.data[indices, :]
+        means = np.mean(subset, axis=0)
+        # Calculate the quadrant (in range(2**m)) for each point
+        rants = (subset[:, 0] >= means[0]) + 0
+        for col in range(1, self.data.shape[1]):
+            rants = (rants * 2) + (subset[:, col] >= means[col])
+
+        # How to process this depends upon how many quadrants are used
+        occur = np.unique(rants)
+        if len(occur) == 1:
+            return {"means": means, "topmost": means, "indices": indices}
+        else:
+            recurse = {rant: self._build(indices[rants == rant]) for rant in occur}
+            qvalues = list(recurse.values())
+            # Find the the topmost, in dictionary order
+            topmost = self._compute_topmost(qvalues)
+
+            # Return what we have found
+            return {"means": means, "topmost": topmost, "quadrants": recurse}
+
+    def _compute_topmost(self, qvalues):
+        topmost = qvalues[0]["topmost"]
+        for k in range(1, len(qvalues)):
+            test_key = qvalues[k]["topmost"]
+            for c in range(len(topmost)):
+                if test_key[c] != topmost[c]:
+                    break
+            if test_key[c] < topmost[c]:
+                topmost = test_key
+        return topmost
+
+    def _find_in_range_and_delete(self, subtree):
+        if "indices" in subtree:
+            # Process this leaf node
+            if all(subtree["means"] >= self.mins) and all(subtree["means"] < self.maxs):
+                # Return these indices and remove the subtree
+                return subtree["indices"], None
+            else:
+                # Return no indices and remove nothing from the subtree
+                return self.no_indices, subtree
+        else:
+            # Process this internal node
+            means = subtree["means"]
+            recurse = dict(
+                (qkey, self._find_in_range_and_delete(qvalue))
+                if all(
+                    (
+                        self.maxs[col] > means[col]
+                        if qkey & 2 ** (self.data.shape[1] - 1 - col)
+                        else self.mins[col] < means[col]
+                        for col in range(self.data.shape[1])
+                    )
+                )
+                else (qkey, (self.no_indices, qvalue))
+                for qkey, qvalue in subtree["quadrants"].items()
+            )
+            indices = np.array(
+                [index for pair in recurse.values() for index in pair[0]],
+                dtype=np.int64,
+            )
+            quadrants = {
+                qkey: pair[1] for qkey, pair in recurse.items() if pair[1] is not None
+            }
+            if len(quadrants) == 0:
+                return indices, None
+            topmost = self._compute_topmost(list(quadrants.values()))
+            return indices, {
+                "means": subtree["means"],
+                "topmost": topmost,
+                "quadrants": quadrants,
+            }
