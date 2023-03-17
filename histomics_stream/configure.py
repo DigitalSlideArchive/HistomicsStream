@@ -19,8 +19,9 @@
 """Whole-slide image streamer for machine learning frameworks."""
 
 import copy
-import datetime
 import itk
+import large_image
+import large_image_source_tiff as large_image_source
 import math
 import numpy as np
 import random
@@ -50,7 +51,8 @@ class _TilesByCommon:
 
     # For each filename, select just upper-left corner for each tile.
     # Note that each upper-left corner is returned as (top, left), not (left, top).
-    def get_tiles(self, study):
+    @staticmethod
+    def get_tiles(study):
         return [
             (
                 slide["filename"],
@@ -408,7 +410,8 @@ class TilesByGridAndMask(_TilesByCommon):
         }
         if bad_keys:
             raise ValueError(
-                f"Unrecognized parameters {repr(bad_keys)} in TilesByGridAndMask.__init__"
+                f"Unrecognized parameters {repr(bad_keys)} in "
+                "TilesByGridAndMask.__init__"
             )
 
         # randomly_select defaults to select all
@@ -588,24 +591,21 @@ class TilesByGridAndMask(_TilesByCommon):
             )
 
         # Look at each tile in turn
-        tiles = slide["tiles"] = {}
-        num_tiles = 0
         top_too_high = self.slide_width - self.tile_height + 1
         left_too_high = self.slide_height - self.tile_width + 1
-        for top in range(0, top_too_high, row_stride):
-            for left in range(0, left_too_high, column_stride):
-                if not (has_mask and self.mask_rejects(top, left)):
-                    tiles[f"tile_{num_tiles}"] = {"tile_top": top, "tile_left": left}
-                num_tiles += 1  # Increment even if tile is skipped.
+        num_left = len(range(0, left_too_high, column_stride))
+        slide["tiles"] = {
+            f"tile_{i * num_left + j}": {"tile_top": top, "tile_left": left}
+            for i, top in enumerate(range(0, top_too_high, row_stride))
+            for j, left in enumerate(range(0, left_too_high, column_stride))
+            if not (has_mask and self.mask_rejects(top, left))
+        }
 
-        # Choose a subset of the tiles randomly
-        all_tile_names = tiles.keys()
-        if 0 <= self.randomly_select < len(all_tile_names):
-            keys_to_remove = random.sample(
-                all_tile_names, len(all_tile_names) - self.randomly_select
+        if 0 <= self.randomly_select < len(slide["tiles"]):
+            # Choose a subset of the tiles randomly
+            slide["tiles"] = dict(
+                random.sample(slide["tiles"].items(), self.randomly_select)
             )
-            for key in keys_to_remove:
-                del tiles[key]
 
     def interpolate_cumulative(self, row, column):
         top = int(math.floor(row))
@@ -722,6 +722,7 @@ class TilesByList(_TilesByCommon):
                 " must be a non-negative integer or -1."
             )
         if not isinstance(tiles_dictionary, dict):
+            print(f"tiles_dictionary = {repr(tiles_dictionary)}")
             raise ValueError("tiles_dictionary must be dictionary.")
         for tile_corner in tiles_dictionary.values():
             # Update keys of the dictionary from deprecated names
@@ -775,16 +776,14 @@ class TilesByList(_TilesByCommon):
         Select the tiles supplied by the user.  Optionally, select a random subset of
         them.
         """
-        tiles = slide["tiles"] = copy.deepcopy(
+        slide["tiles"] = copy.deepcopy(
             self.tiles_dictionary
         )  # in case __call__ is called again.
-        all_tile_names = tiles.keys()
-        if 0 <= self.randomly_select < len(all_tile_names):
-            keys_to_remove = random.sample(
-                all_tile_names, len(all_tile_names) - self.randomly_select
+        if 0 <= self.randomly_select < len(slide["tiles"]):
+            # Choose a subset of the tiles randomly
+            slide["tiles"] = dict(
+                random.sample(slide["tiles"].items(), self.randomly_select)
             )
-            for key in keys_to_remove:
-                del tiles[key]
 
 
 class TilesRandomly(_TilesByCommon):
@@ -859,15 +858,13 @@ class TilesRandomly(_TilesByCommon):
 
         row_too_big = slide["slide_width"] - self.tile_height + 1
         column_too_big = slide["slide_height"] - self.tile_width + 1
-        row_column_list = [
-            (random.randrange(0, row_too_big), random.randrange(0, column_too_big))
-            for _ in range(self.randomly_select)
-        ]
-        tiles = slide["tiles"] = {}
-        num_tiles = 0
-        for row, column in row_column_list:
-            tiles[f"tile_{num_tiles}"] = {"tile_top": row, "tile_left": column}
-            num_tiles += 1
+        slide["tiles"] = {
+            f"tile_{i}": {
+                "tile_top": random.randrange(0, row_too_big),
+                "tile_left": random.randrange(0, column_too_big),
+            }
+            for i in range(self.randomly_select)
+        }
 
 
 class ChunkLocations(_TilesByCommon):
@@ -1023,15 +1020,14 @@ class ChunkLocations(_TilesByCommon):
         chunk_right,
         returned_magnification,
     ):
-        import large_image
-        import large_image_source_tiff as large_image_source
-
         # if "_num_chunks" not in ChunkLocations.read_large_image.__dict__:
         #     ChunkLocations.read_large_image._num_chunks = 0
-        # chunk_name = f"{ChunkLocations.read_large_image._num_chunks:06}"
+        # chunk_name = (
+        #     f"#read_large_image {ChunkLocations.read_large_image._num_chunks:06}"
+        # )
         # ChunkLocations.read_large_image._num_chunks += 1
 
-        # print(f"#{chunk_name} started {datetime.datetime.now()}")
+        # print(f"{chunk_name} begin {datetime.datetime.now()}")
         ts = large_image_source.open(filename)
         chunk = ts.getRegion(
             scale=dict(magnification=returned_magnification),
@@ -1044,7 +1040,7 @@ class ChunkLocations(_TilesByCommon):
                 units="mag_pixels",
             ),
         )[0]
-        # print(f"#{chunk_name} done {datetime.datetime.now()}")
+        # print(f"{chunk_name} end {datetime.datetime.now()}")
         return chunk
 
     @staticmethod
@@ -1093,7 +1089,8 @@ class ChunkLocations(_TilesByCommon):
             # Return what we have found
             return {"means": means, "topmost": topmost, "quadrants": recurse}
 
-    def _compute_topmost(self, qvalues):
+    @staticmethod
+    def _compute_topmost(qvalues):
         topmost = qvalues[0]["topmost"]
         for k in range(1, len(qvalues)):
             test_key = qvalues[k]["topmost"]
