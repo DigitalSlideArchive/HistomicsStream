@@ -18,7 +18,6 @@
 
 """Whole-slide image streamer for machine learning frameworks."""
 
-import datetime
 import math
 import tensorflow as tf
 from . import configure
@@ -42,105 +41,72 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
         configure.ChunkLocations.__call__(self, study_description)
         # print(f"Build chunks: end {datetime.datetime.now()}")
 
-        # Build one record for each chunk
-        _singular = {"tiles_top": "tile_top", "tiles_left": "tile_left"}
-        # print(f"Build chunk_list_by_row: begin {datetime.datetime.now()}")
-        chunk_list_by_row = [
-            {
-                **{
-                    key: value
-                    for key, value in study_description.items()
-                    if key != "slides"
-                },
-                **{
-                    key: value
-                    for key, value in slide_description.items()
-                    if key not in ("tiles", "chunks")
-                },
-                **{
-                    key: value
-                    for key, value in chunk_description.items()
-                    if key != "tiles"
-                },
-                **{
-                    key: [
-                        tile_description[_singular[key]]
-                        for tile_description in chunk_description["tiles"].values()
+        # print(f"Build one_chunk_per_slice: begin {datetime.datetime.now()}")
+        study_keys = study_description
+        slide_keys = next(iter(study_keys["slides"].values()))
+        chunk_keys = next(iter(slide_keys["chunks"].values()))
+        tile_keys = {"tiles_top": "tile_top", "tiles_left": "tile_left"}
+        one_chunk_per_slice = {
+            **{
+                key: tf.constant(
+                    [
+                        study_description[key]
+                        for slide_description in study_description["slides"].values()
+                        for chunk_description in slide_description["chunks"].values()
                     ]
-                    for key in ("tiles_top", "tiles_left")
-                },
-            }
-            for slide_description in study_description["slides"].values()
-            for chunk_description in slide_description["chunks"].values()
-        ]
-        # print(f"Build chunk_list_by_row: end {datetime.datetime.now()}")
+                )
+                for key in study_keys
+                if key != "slides"
+            },
+            **{
+                key: tf.constant(
+                    [
+                        slide_description[key]
+                        for slide_description in study_description["slides"].values()
+                        for chunk_description in slide_description["chunks"].values()
+                    ]
+                )
+                for key in slide_keys
+                if key not in ("tiles", "chunks")
+            },
+            **{
+                key: tf.constant(
+                    [
+                        chunk_description[key]
+                        for slide_description in study_description["slides"].values()
+                        for chunk_description in slide_description["chunks"].values()
+                    ]
+                )
+                for key in chunk_keys
+                if key != "tiles"
+            },
+            **{
+                plural: tf.ragged.constant(
+                    [
+                        [
+                            tile_description[singular]
+                            for tile_description in chunk_description["tiles"].values()
+                        ]
+                        for slide_description in study_description["slides"].values()
+                        for chunk_description in slide_description["chunks"].values()
+                    ]
+                )
+                for plural, singular in tile_keys.items()
+            },
+        }
+        # print(f"Build one_chunk_per_slice: end {datetime.datetime.now()}")
 
-        if False:
+        # print(
+        #     "Build study_dataset from_tensor_slices: begin "
+        #     f"{datetime.datetime.now()}"
+        # )
+        study_dataset = tf.data.Dataset.from_tensor_slices(one_chunk_per_slice)
+        del one_chunk_per_slice
+        # print(
+        #     f"Build study_dataset from_tensor_slices: end {datetime.datetime.now()}"
+        # )
 
-            def gen():
-                for row in chunk_list_by_row:
-                    yield {
-                        key: (
-                            tf.constant
-                            if key not in ("tiles_top", "tiles_left")
-                            else tf.ragged.constant
-                        )([value])
-                        for key, value in row.items()
-                    }
-
-            # This approach is not used because TensorFlow is rejecting output_signature
-            # = study_dataset.element_spec (and variations thereof).
-            output_signature = {
-                "version": tf.TensorSpec(shape=(), dtype=tf.string),
-                "tile_width": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "tile_height": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "overlap_height": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "overlap_width": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "filename": tf.TensorSpec(shape=(), dtype=tf.string),
-                "slide_name": tf.TensorSpec(shape=(), dtype=tf.string),
-                "slide_group": tf.TensorSpec(shape=(), dtype=tf.string),
-                "target_magnification": tf.TensorSpec(shape=(), dtype=tf.float32),
-                "scan_magnification": tf.TensorSpec(shape=(), dtype=tf.float32),
-                "read_magnification": tf.TensorSpec(shape=(), dtype=tf.float32),
-                "returned_magnification": tf.TensorSpec(shape=(), dtype=tf.float64),
-                "level": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "slide_width": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "slide_height": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "chunk_height": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "chunk_width": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "slide_height_tiles": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "slide_width_tiles": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "chunk_top": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "chunk_left": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "chunk_bottom": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "chunk_right": tf.TensorSpec(shape=(), dtype=tf.int32),
-                "tiles_top": tf.RaggedTensorSpec(
-                    tf.TensorShape([None]), tf.int32, 0, tf.int64
-                ),
-                "tiles_left": tf.RaggedTensorSpec(
-                    tf.TensorShape([None]), tf.int32, 0, tf.int64
-                ),
-            }
-            study_dataset = tf.data.Dataset.from_generator(gen, output_signature)
-        else:
-            # print(f"Build chunk_list_by_column: begin {datetime.datetime.now()}")
-            chunk_list_by_column = {
-                key: (
-                    tf.constant
-                    if key not in ("tiles_top", "tiles_left")
-                    else tf.ragged.constant
-                )([chunk[key] for chunk in chunk_list_by_row])
-                for key in chunk_list_by_row[0].keys()
-            }
-            # print(f"Build chunk_list_by_column: end {datetime.datetime.now()}")
-
-            del chunk_list_by_row
-            # print(f"Build study_dataset from_tensor_slices: begin {datetime.datetime.now()}")
-            study_dataset = tf.data.Dataset.from_tensor_slices(chunk_list_by_column)
-            # print(f"Build study_dataset from_tensor_slices: end {datetime.datetime.now()}")
-            del chunk_list_by_column
-
-            # print(f"{study_dataset.element_spec = }")
+        # print(f"study_dataset.element_spec = {study_dataset.element_spec}")
 
         # Shard the dataset
         if num_workers != 1 or worker_index != 0:
@@ -150,7 +116,7 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
         # is a chunk.  Read in the chunk pixel data and split it into tiles.
         # print(f"Build study_dataset map: begin {datetime.datetime.now()}")
         study_dataset = study_dataset.map(
-            self._read_and_split_chunk, **self.dataset_map_options
+            CreateTensorFlowDataset._read_and_split_chunk, **self.dataset_map_options
         )
         # print(f"Build study_dataset map: end {datetime.datetime.now()}")
 
@@ -170,12 +136,17 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
         # print(f"Build study_dataset pop: end {datetime.datetime.now()}")
         return study_dataset
 
-    @tf.function
-    def _read_and_split_chunk(self, elem):
+    @staticmethod
+    def _read_and_split_chunk(elem):
         # Get chunk's pixel data from disk and load it into chunk_as_tensor.
         # Note that if elem["factor"] differs from 1.0 then this chunk will have
         # num_rows ((chunk_bottom - chunk_top) / factor, and num_columns =
         # ((chunk_right - chunk_left) / factor.
+        # tf.print("#_read_and_split_chunk begin")
+        zero = tf.constant(0, dtype=tf.int32)
+        one = tf.constant(1, dtype=tf.int32)
+        epsilon = tf.constant(0.01, dtype=tf.float32)
+
         factor = tf.cast(elem["target_magnification"], dtype=tf.float32) / tf.cast(
             elem["returned_magnification"], dtype=tf.float32
         )
@@ -197,29 +168,25 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
 
         scaled_tile_height = tf.cast(
             tf.math.floor(
-                tf.cast(elem["tile_height"], dtype=tf.float32) / factor
-                + tf.convert_to_tensor(0.01, dtype=tf.float32)
+                tf.cast(elem["tile_height"], dtype=tf.float32) / factor + epsilon
             ),
             dtype=tf.int32,
         )
         scaled_tile_width = tf.cast(
             tf.math.floor(
-                tf.cast(elem["tile_width"], dtype=tf.float32) / factor
-                + tf.convert_to_tensor(0.01, dtype=tf.float32)
+                tf.cast(elem["tile_width"], dtype=tf.float32) / factor + epsilon
             ),
             dtype=tf.int32,
         )
         scaled_chunk_top = tf.cast(
             tf.math.floor(
-                tf.cast(elem["chunk_top"], dtype=tf.float32) / factor
-                + tf.convert_to_tensor(0.01, dtype=tf.float32)
+                tf.cast(elem["chunk_top"], dtype=tf.float32) / factor + epsilon
             ),
             dtype=tf.int32,
         )
         scaled_chunk_left = tf.cast(
             tf.math.floor(
-                tf.cast(elem["chunk_left"], dtype=tf.float32) / factor
-                + tf.convert_to_tensor(0.01, dtype=tf.float32)
+                tf.cast(elem["chunk_left"], dtype=tf.float32) / factor + epsilon
             ),
             dtype=tf.int32,
         )
@@ -229,7 +196,7 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
 
         def body(i, tiles):
             return (
-                i + 1,
+                i + one,
                 tiles.write(
                     i,
                     tf.image.crop_to_bounding_box(
@@ -240,7 +207,7 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
                                     tf.gather(elem["tiles_top"], i), dtype=tf.float32
                                 )
                                 / factor
-                                + tf.convert_to_tensor(0.01, dtype=tf.float32)
+                                + epsilon
                             ),
                             dtype=tf.int32,
                         )
@@ -251,7 +218,7 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
                                     tf.gather(elem["tiles_left"], i), dtype=tf.float32
                                 )
                                 / factor
-                                + tf.convert_to_tensor(0.01, dtype=tf.float32)
+                                + epsilon
                             ),
                             dtype=tf.int32,
                         )
@@ -262,21 +229,21 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
                 ),
             )
 
-        _, tiles = tf.while_loop(condition, body, [0, tiles])
+        _, tiles = tf.while_loop(condition, body, [zero, tiles])
         tiles = tiles.stack()
 
-        response = {}
-        for key in elem.keys():
-            if key not in ("tiles_top", "tiles_left"):
-                response[key] = tf.repeat(elem[key], num_tiles)
-
         response = {
-            **response,
+            **{
+                key: tf.repeat(elem[key], num_tiles)
+                for key in elem.keys()
+                if key not in ("tiles_top", "tiles_left")
+            },
             "tile_top": elem["tiles_top"],
             "tile_left": elem["tiles_left"],
             "tile_pixels": tiles,
         }
 
+        # tf.print("#_read_and_split_chunk end")
         return response
 
     @staticmethod
@@ -294,6 +261,14 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
         whole slide.
         """
 
+        # if "_num_chunks" not in CreateTensorFlowDataset._py_read_chunk.__dict__:
+        #     CreateTensorFlowDataset._py_read_chunk._num_chunks = 0
+        # chunk_name = (
+        #     f"#_py_read_chunk {CreateTensorFlowDataset._py_read_chunk._num_chunks:06}"
+        # )
+        # CreateTensorFlowDataset._py_read_chunk._num_chunks += 1
+
+        # print(f"{chunk_name} begin {datetime.datetime.now()}")
         filename = filename.numpy().decode("utf-8")
         chunk_top = math.floor(chunk_top.numpy() / factor.numpy() + 0.01)
         chunk_left = math.floor(chunk_left.numpy() / factor.numpy() + 0.01)
@@ -301,6 +276,7 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
         chunk_right = math.floor(chunk_right.numpy() / factor.numpy() + 0.01)
         returned_magnification = returned_magnification.numpy()
 
+        # print(f"{chunk_name} begin1 {datetime.datetime.now()}")
         # Call to the superclass to get the pixel data for this chunk
         chunk = configure.ChunkLocations.read_large_image(
             filename,
@@ -310,6 +286,9 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
             chunk_right,
             returned_magnification,
         )
+        # print(f"{chunk_name} begin2 {datetime.datetime.now()}")
 
-        # Do we want to support other than RGB and/or other than uint8?!!!
-        return tf.convert_to_tensor(chunk[..., :3], dtype=tf.uint8)
+        # Do we want to support other than RGB?!!!
+        chunk = chunk[..., :3]
+        # print(f"{chunk_name} end {datetime.datetime.now()}")
+        return chunk
