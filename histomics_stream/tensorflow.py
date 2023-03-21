@@ -31,10 +31,21 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
             "deterministic": False,
         }
 
-    def __call__(self, study_description, num_workers=1, worker_index=0):
+    def __call__(
+        self,
+        study_description,
+        num_workers=None,
+        worker_index=None,
+        private_threadpool_size=None,
+    ):
         """
         From scratch, creates a tensorflow dataset with one tensorflow element per tile
         """
+        num_workers = num_workers if num_workers is not None else 1
+        worker_index = worker_index if worker_index is not None else 0
+        private_threadpool_size = (
+            private_threadpool_size if private_threadpool_size is not None else 1
+        )
 
         # Call to superclass to find the locations for the chunks
         # print(f"Build chunks: begin {datetime.datetime.now()}")
@@ -134,6 +145,17 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
             lambda elem: (elem, None, None), **self.dataset_map_options
         )
         # print(f"Build study_dataset pop: end {datetime.datetime.now()}")
+
+        # By default `private_threadpool_size` is set to 0, which means that Tensorflow
+        # is free to choose the number without limit.  However, Tensorflow can grind to
+        # a halt when processing a large dataset with this default behavior on GPU.  A
+        # value of 1 for `private_threadpool_size` runs more quickly than other values
+        # on some tests we tried.  Changing `private_threadpool_size` here is achieved
+        # as a transformation of the dataset with an `options` object.
+        options = tf.data.Options()
+        options.threading.private_threadpool_size = private_threadpool_size
+        study_dataset = study_dataset.with_options(options)
+
         return study_dataset
 
     @staticmethod
