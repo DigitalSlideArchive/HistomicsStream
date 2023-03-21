@@ -37,7 +37,7 @@ jobs:
           sudo apt install openslide-tools python3-openslide
           python -m pip install --upgrade pip setuptools wheel
           pip install 'flake8${{ matrix.flake8-python-git-tag }}' 'pytest${{ matrix.pytest-python-git-tag }}' 'itk${{ matrix.itk-python-git-tag }}' 'tensorflow'
-          pip install 'large-image[openslide,ometiff,openjpeg,bioformats]' 'scikit_image' --find-links https://girder.github.io/large_image_wheels
+          pip install 'large-image[bioformats,ometiff,openjpeg,openslide,tiff]' 'scikit_image' --find-links https://girder.github.io/large_image_wheels
 
       - name: Install histomics_stream
         run: |
