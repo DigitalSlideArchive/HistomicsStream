@@ -43,3 +43,9 @@ CMakeLists.txt.user*
 
 # Ignore testing temporary files
 Testing/Temporary/
+
+# Checkpoint files for Jupyter
+.ipynb_checkpoints/
+
+# Compiled Python files
+__pycache__/
