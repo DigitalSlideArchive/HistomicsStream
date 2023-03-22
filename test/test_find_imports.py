@@ -19,12 +19,19 @@
 # =========================================================================
 
 
-def test_itk_can_be_found():
-    """Purpose: Test to check that ITK can be found"""
+def test_imports_can_be_found():
+    """Purpose: Test to check that each import can be found"""
 
     # Import succeeds
+    import imagecodecs
     import itk
+    import numcodecs
+    import numpy
+    import scipy.interpolate
+    import tensorflow
+    import torch
+    import zarr
 
 
 if __name__ == "__main__":
-    test_itk_can_be_found()
+    test_imports_can_be_found()

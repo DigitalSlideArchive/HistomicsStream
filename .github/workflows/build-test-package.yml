@@ -12,7 +12,7 @@ jobs:
 
         include:
           - flake8-python-git-tag: ""
-          - itk-python-git-tag: ""
+          - pooch-python-git-tag: ""
           - pytest-python-git-tag: ""
 
     steps:
@@ -36,7 +36,7 @@ jobs:
           sudo apt update
           sudo apt install openslide-tools python3-openslide
           python -m pip install --upgrade pip setuptools wheel
-          pip install 'flake8${{ matrix.flake8-python-git-tag }}' 'pytest${{ matrix.pytest-python-git-tag }}' 'itk${{ matrix.itk-python-git-tag }}' 'tensorflow'
+          pip install 'flake8${{ matrix.flake8-python-git-tag }}' 'pooch${{ matrix.pooch-python-git-tag }}' 'pytest${{ matrix.pytest-python-git-tag }}'
           pip install 'large-image[bioformats,ometiff,openjpeg,openslide,tiff]' 'scikit_image' --find-links https://girder.github.io/large_image_wheels
 
       - name: Install histomics_stream
