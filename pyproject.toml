@@ -13,7 +13,9 @@ classifiers = ["License :: OSI Approved :: Apache Software License"]
 dependencies = [
     "imagecodecs",
     "itk",
+    "numcodecs",
     "numpy<1.24",
+    "scipy",
     "tensorflow",
     "torch",
     "zarr",
