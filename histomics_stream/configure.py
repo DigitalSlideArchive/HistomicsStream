@@ -35,13 +35,13 @@ class _TilesByCommon:
         self._key_mapping = {
             "number_pixel_columns_for_chunk": "chunk_width",
             "number_pixel_columns_for_mask": "mask_width",
-            "number_pixel_columns_for_slide": "slide_height",
+            "number_pixel_columns_for_slide": "slide_width",
             "number_pixel_columns_for_tile": "tile_width",
             "number_pixel_overlap_columns_for_tile": "tile_overlap_width",
             "number_pixel_overlap_rows_for_tile": "tile_overlap_height",
             "number_pixel_rows_for_chunk": "chunk_height",
             "number_pixel_rows_for_mask": "mask_height",
-            "number_pixel_rows_for_slide": "slide_width",
+            "number_pixel_rows_for_slide": "slide_height",
             "number_pixel_rows_for_tile": "tile_height",
             "number_tile_columns_for_slide": "slide_width_tiles",
             "number_tile_rows_for_slide": "slide_height_tiles",
@@ -98,7 +98,7 @@ class FindResolutionForSlide(_TilesByCommon):
 
     An instance of class FindResolutionForSlide is a callable that will add level,
     target_magnification, scan_magnification, read_magnification,
-    returned_magnification, slide_width, and slide_height fields to a slide dictionary.
+    returned_magnification, slide_height, and slide_width fields to a slide dictionary.
 
     Parameters for the constructor
     ------------------------------
