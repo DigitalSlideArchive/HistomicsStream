@@ -555,15 +555,12 @@ class TilesByGridAndMask(_TilesByCommon):
         # Find the coordinates of each tile
         top_too_large = self.slide_height - self.tile_height + 1
         left_too_large = self.slide_width - self.tile_width + 1
-        top_left = np.array(
-            [
-                pair
-                for pair in itertools.product(
-                    np.arange(0, top_too_large, height_stride),
-                    np.arange(0, left_too_large, width_stride),
-                )
-            ],
-            dtype=np.int64,
+        top_left = np.fromiter(
+            itertools.product(
+                np.arange(0, top_too_large, height_stride),
+                np.arange(0, left_too_large, width_stride),
+            ),
+            dtype=np.dtype([("top", np.int64), ("left", np.int64)]),
         )
 
         if hasattr(self, "mask_itk"):
