@@ -54,8 +54,8 @@ def test_mask_threshold():
 
     my_study = dict(
         version="version-1",
-        tile_width=5471,
-        tile_height=5743,
+        number_pixel_columns_for_tile=5471,
+        number_pixel_rows_for_tile=5743,
         overlap_width=127,
         overlap_height=101,
         slides=dict(
@@ -77,7 +77,11 @@ def test_mask_threshold():
     tiler_thresholds = (0.00, 0.20, 0.50, 0.80, 1.00)
     tilers = [
         hs.configure.TilesByGridAndMask(
-            my_study, mask_filename=mask_path, mask_threshold=threshold
+            my_study,
+            mask_filename=mask_path,
+            mask_threshold=threshold,
+            number_pixel_overlap_rows_for_tile=101,
+            number_pixel_overlap_columns_for_tile=127,
         )
         for threshold in tiler_thresholds
     ]
@@ -85,7 +89,16 @@ def test_mask_threshold():
     def run_tiler(study, tiler):
         for slide in study["slides"].values():
             tiler(slide)
-        return tiler.get_tiles(my_study)
+        return [
+            (
+                value["filename"],
+                [
+                    (tile["tile_top"], tile["tile_left"])
+                    for tile in value["tiles"].values()
+                ],
+            )
+            for value in study["slides"].values()
+        ]
 
     found_tiles = [run_tiler(my_study, tiler) for tiler in tilers]
 
