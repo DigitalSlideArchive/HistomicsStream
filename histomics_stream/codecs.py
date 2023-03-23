@@ -18,8 +18,8 @@
 
 """Whole-slide image streamer for machine learning frameworks.
 
-The histomics_stream.codecs module supplies codecs that are useful for Zarr file storage with jpeg or
-jpeg2k compression.
+The histomics_stream.codecs module supplies codecs that are useful for Zarr file storage
+with jpeg or jpeg2k compression.
 
 """
 
@@ -39,10 +39,10 @@ class jpeg(Codec):
 
     Notes
     -----
-    For the code that uses Zarr data storage for jpeg images, we need to supply codecs.  Note that we
-    use this codec instead of that available from the zarr_jpeg package.  The latter collapses
-    dimensions by default, can require us to transpose dimensions, and can miss optimizations based upon
-    RGB data.
+    For the code that uses Zarr data storage for jpeg images, we need to supply codecs.
+    Note that we use this codec instead of that available from the zarr_jpeg package.
+    The latter collapses dimensions by default, can require us to transpose dimensions,
+    and can miss optimizations based upon RGB data.
 
     """
 

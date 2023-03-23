@@ -18,6 +18,10 @@
 
 """Whole-slide image streamer for machine learning frameworks."""
 
+import numpy as np
+import torch
+from . import configure
+
 """
 See: How to load a list of numpy arrays to pytorch dataset loader?
 https://stackoverflow.com/questions/44429199/how-to-load-a-list-of-numpy-arrays-to-pytorch-dataset-loader
@@ -33,13 +37,7 @@ Using a torch.utils.data.DataLoader on the torch.utils.data.Dataset subclass is 
 """
 See: A Comprehensive Guide to the DataLoader Class and Abstractions in PyTorch
 https://blog.paperspace.com/dataloaders-abstractions-pytorch/
-
 """
-
-import numpy as np
-import torch
-
-from . import configure
 
 
 class CreateTorchDataloader(configure.ChunkLocations):
