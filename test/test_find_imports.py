@@ -22,15 +22,14 @@
 def test_imports_can_be_found():
     """Purpose: Test to check that each import can be found"""
 
-    # Import succeeds
-    import imagecodecs
-    import itk
-    import numcodecs
-    import numpy
-    import scipy.interpolate
-    import tensorflow
-    import torch
-    import zarr
+    import imagecodecs  # noqa: F401
+    import itk  # noqa: F401
+    import numcodecs  # noqa: F401
+    import numpy  # noqa: F401
+    import scipy.interpolate  # noqa: F401
+    import tensorflow  # noqa: F401
+    import torch  # noqa: F401
+    import zarr  # noqa: F401
 
 
 if __name__ == "__main__":

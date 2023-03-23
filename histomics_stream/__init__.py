@@ -26,4 +26,4 @@ This module supports efficient whole-slide reading and processing for a machine 
 execution graph.
 
 """
-from . import configure, codecs
+from . import configure, codecs  # noqa: F401,E402

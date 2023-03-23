@@ -36,9 +36,10 @@ def test_create_study():
 
     # Add a slide to the study, including slide-wide information with it.
     my_slide0 = my_slides["Slide_0"] = {}
-    my_slide0[
-        "filename"
-    ] = "/tf/notebooks/histomics_stream/example/TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs"
+    my_slide0["filename"] = (
+        "/tf/notebooks/histomics_stream/example/"
+        "TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913.svs"
+    )
     my_slide0["slide_name"] = "TCGA-BH-A0BZ-01Z-00-DX1"
     my_slide0["slide_group"] = "TCGA-BH-A0BZ"
     my_slide0["chunk_height"] = 2048
@@ -81,7 +82,8 @@ def test_create_study():
             my_study_by_grid_and_mask,
             overlap_height=0,
             overlap_width=0,
-            mask_filename="/tf/notebooks/histomics_stream/example/TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913-mask.png",
+            mask_filename="/tf/notebooks/histomics_stream/example/"
+            "TCGA-BH-A0BZ-01Z-00-DX1.45EB3E93-A871-49C6-9EAE-90D98AE01913-mask.png",
             randomly_select=100,
         )
         # We could apply this to a subset of the slides, but we will apply it to all
