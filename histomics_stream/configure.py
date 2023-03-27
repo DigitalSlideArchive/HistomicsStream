@@ -614,9 +614,8 @@ class TilesByGridAndMask(_TilesByCommon):
         cumulative_mask = np.zeros(
             (self.mask_height + 2, self.mask_width + 2), dtype=np.int64
         )
-        nonzero = np.vectorize(lambda x: int(x != 0))
-        cumulative_mask[1 : self.mask_height + 1, 1 : self.mask_width + 1] = nonzero(
-            itk.GetArrayViewFromImage(self.mask_itk)
+        cumulative_mask[1 : self.mask_height + 1, 1 : self.mask_width + 1] = (
+            itk.GetArrayViewFromImage(self.mask_itk).astype(bool).astype(np.int64)
         )
         cumulative_mask = np.cumsum(np.cumsum(cumulative_mask, axis=0), axis=1)
 
