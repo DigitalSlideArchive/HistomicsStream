@@ -486,11 +486,7 @@ class TilesByGridAndMask(_TilesByCommon):
                 f' tile_width ({study["tile_width"]}).'
             )
         if mask_filename != "":
-            mask_itk = itk.imread(mask_filename)  # May throw exception
-            if mask_itk.GetImageDimension() != 2:
-                raise ValueError(
-                    f"The mask ({mask_filename}) should be a 2-dimensional image."
-                )
+            mask_itk = self.check_mask_filename(mask_filename)
         if not (
             isinstance(mask_threshold, float)
             and mask_threshold >= 0.0
@@ -586,6 +582,14 @@ class TilesByGridAndMask(_TilesByCommon):
             slide["tiles"] = dict(
                 random.sample(slide["tiles"].items(), self.randomly_select)
             )
+
+    def check_mask_filename(self, mask_filename):
+        mask_itk = itk.imread(mask_filename)  # May throw exception
+        if mask_itk.GetImageDimension() != 2:
+            raise ValueError(
+                f"The mask ({mask_filename}) should be a 2-dimensional image."
+            )
+        return mask_itk
 
     def compute_from_mask(self, top_left):
         # Check that the input and output aspect ratios are pretty close
