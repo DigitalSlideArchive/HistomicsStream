@@ -22,9 +22,10 @@ import copy
 import itertools
 import itk
 import large_image
-import large_image_source_tiff as large_image_source
+import large_image_source_tiff
 import math
 import numpy as np
+import os
 import random
 import re
 import scipy.interpolate
@@ -1041,7 +1042,11 @@ class ChunkLocations(_TilesByCommon):
         # ChunkLocations.read_large_image._num_chunks += 1
 
         # print(f"{chunk_name} begin {datetime.datetime.now()}")
-        ts = large_image_source.open(filename)
+        ts = (
+            large_image_source_tiff.open(filename)
+            if os.path.splitext(filename)[1] in (".tif", ".tiff", ".svs")
+            else large_image.open(filename)
+        )
         chunk = ts.getRegion(
             scale=dict(magnification=returned_magnification),
             format=large_image.constants.TILE_FORMAT_NUMPY,
