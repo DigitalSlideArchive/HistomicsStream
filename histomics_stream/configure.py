@@ -150,7 +150,8 @@ class FindResolutionForSlide(_TilesByCommon):
         if not ("version" in study and study["version"] == "version-1"):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
         if not (
-            isinstance(target_magnification, (int, float)) and 0 < target_magnification
+            isinstance(target_magnification, (int, np.integer, float, np.floating))
+            and 0 < target_magnification
         ):
             raise ValueError(
                 f"target_magnification ({target_magnification})"
@@ -453,7 +454,7 @@ class TilesByGridAndMask(_TilesByCommon):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
         if not (
             "tile_height" in study
-            and isinstance(study["tile_height"], int)
+            and isinstance(study["tile_height"], (int, np.integer))
             and study["tile_height"] > 0
         ):
             raise ValueError(
@@ -461,26 +462,32 @@ class TilesByGridAndMask(_TilesByCommon):
             )
         if not (
             "tile_width" in study
-            and isinstance(study["tile_width"], int)
+            and isinstance(study["tile_width"], (int, np.integer))
             and study["tile_width"] > 0
         ):
             raise ValueError(
                 'study["tile_width"]' " must exist and be a positive integer"
             )
-        if not (isinstance(randomly_select, int) and -1 <= randomly_select):
+        if not (
+            isinstance(randomly_select, (int, np.integer)) and -1 <= randomly_select
+        ):
             raise ValueError(
                 f"randomly_select ({randomly_select})"
                 " must be a non-negative integer or -1."
             )
         if not (
-            isinstance(overlap_height, int) and overlap_height < study["tile_height"]
+            isinstance(overlap_height, (int, np.integer))
+            and overlap_height < study["tile_height"]
         ):
             raise ValueError(
                 f"overlap_height ({overlap_height})"
                 " must be less than"
                 f' tile_height ({study["tile_height"]}).'
             )
-        if not (isinstance(overlap_width, int) and overlap_width < study["tile_width"]):
+        if not (
+            isinstance(overlap_width, (int, np.integer))
+            and overlap_width < study["tile_width"]
+        ):
             raise ValueError(
                 f"overlap_width ({overlap_width})"
                 " must be less than"
@@ -489,7 +496,7 @@ class TilesByGridAndMask(_TilesByCommon):
         if mask_filename != "":
             mask_itk = self.check_mask_filename(mask_filename)
         if not (
-            isinstance(mask_threshold, float)
+            isinstance(mask_threshold, (float, np.floating))
             and mask_threshold >= 0.0
             and mask_threshold <= 1.0
         ):
@@ -717,7 +724,7 @@ class TilesByList(_TilesByCommon):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
         if not (
             "tile_height" in study
-            and isinstance(study["tile_height"], int)
+            and isinstance(study["tile_height"], (int, np.integer))
             and study["tile_height"] > 0
         ):
             raise ValueError(
@@ -725,13 +732,15 @@ class TilesByList(_TilesByCommon):
             )
         if not (
             "tile_width" in study
-            and isinstance(study["tile_width"], int)
+            and isinstance(study["tile_width"], (int, np.integer))
             and study["tile_width"] > 0
         ):
             raise ValueError(
                 'study["tile_width"]' " must exist and be a positive integer"
             )
-        if not (isinstance(randomly_select, int) and -1 <= randomly_select):
+        if not (
+            isinstance(randomly_select, (int, np.integer)) and -1 <= randomly_select
+        ):
             raise ValueError(
                 f"randomly_select ({randomly_select})"
                 " must be a non-negative integer or -1."
@@ -832,7 +841,7 @@ class TilesRandomly(_TilesByCommon):
             raise ValueError('study["version"] must exist and be equal to "version-1".')
         if not (
             "tile_height" in study
-            and isinstance(study["tile_height"], int)
+            and isinstance(study["tile_height"], (int, np.integer))
             and study["tile_height"] > 0
         ):
             raise ValueError(
@@ -840,13 +849,15 @@ class TilesRandomly(_TilesByCommon):
             )
         if not (
             "tile_width" in study
-            and isinstance(study["tile_width"], int)
+            and isinstance(study["tile_width"], (int, np.integer))
             and study["tile_width"] > 0
         ):
             raise ValueError(
                 'study["tile_width"]' " must exist and be a positive integer"
             )
-        if not (isinstance(randomly_select, int) and 0 <= randomly_select):
+        if not (
+            isinstance(randomly_select, (int, np.integer)) and 0 <= randomly_select
+        ):
             raise ValueError(
                 f"randomly_select ({randomly_select})"
                 " must be a non-negative integer."
@@ -904,7 +915,7 @@ class ChunkLocations(_TilesByCommon):
             )
         if not (
             "tile_height" in study_description
-            and isinstance(study_description["tile_height"], int)
+            and isinstance(study_description["tile_height"], (int, np.integer))
             and study_description["tile_height"] > 0
         ):
             raise ValueError(
@@ -913,7 +924,7 @@ class ChunkLocations(_TilesByCommon):
             )
         if not (
             "tile_width" in study_description
-            and isinstance(study_description["tile_width"], int)
+            and isinstance(study_description["tile_width"], (int, np.integer))
             and study_description["tile_width"] > 0
         ):
             raise ValueError(
@@ -926,7 +937,10 @@ class ChunkLocations(_TilesByCommon):
 
             if not (
                 "returned_magnification" in slide
-                and isinstance(slide["returned_magnification"], (int, float))
+                and isinstance(
+                    slide["returned_magnification"],
+                    (int, np.integer, float, np.floating),
+                )
                 and slide["returned_magnification"] > 0
             ):
                 raise ValueError(
@@ -957,7 +971,7 @@ class ChunkLocations(_TilesByCommon):
 
             if not (
                 "chunk_height" in slide
-                and isinstance(slide["chunk_height"], int)
+                and isinstance(slide["chunk_height"], (int, np.integer))
                 and slide["chunk_height"] > 0
             ):
                 raise ValueError(
@@ -965,7 +979,7 @@ class ChunkLocations(_TilesByCommon):
                 )
             if not (
                 "chunk_width" in slide
-                and isinstance(slide["chunk_width"], int)
+                and isinstance(slide["chunk_width"], (int, np.integer))
                 and slide["chunk_width"] > 0
             ):
                 raise ValueError(
