@@ -757,7 +757,7 @@ class TilesByList(_TilesByCommon):
             )
             and all(
                 [
-                    isinstance(tile_corner[key], int)
+                    isinstance(tile_corner[key], (int, np.integer))
                     for tile_corner in tiles_dictionary.values()
                     for key in ("tile_top", "tile_left")
                 ]
