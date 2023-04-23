@@ -322,7 +322,8 @@ class FindResolutionForSlide(_TilesByCommon):
                     "in Zarr storage."
                 )
 
-        slide["level"] = level
+        int_level = int(round(level))
+        slide["level"] = int_level if abs(level - int_level) < 1e-4 else level
         # Note that slide size is defined by the requested magnification, which may not
         # be the same as the magnification for the selected level.  To get the slide
         # size for the magnification that we are using, these values must later be
