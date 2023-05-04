@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # =========================================================================
 #
 #   Copyright NumFOCUS
@@ -35,9 +33,9 @@ run on another computer.
 
 """
 # If you've just started a fresh docker container you may need some of this:
-apt update ; apt install git ; \
+apt update ; apt install -y git emacs ; \
 rm -rf /.local ; \
-pip install -U pip setuptools wheel ; \
+pip install -U pip setuptools wheel pillow ; \
 pip install \
     'black[jupyter]' \
     'large_image[openslide,tiff]' \
@@ -51,7 +49,7 @@ pip install \
 
 
 def get_data():
-    start_time = time.perf_counter()
+    start_time = time.time()
     wsi_path = pooch.retrieve(
         fname="TCGA-AN-A0G0-01Z-00-DX1.svs",
         url="https://drive.google.com/uc"
@@ -63,10 +61,10 @@ def get_data():
         known_hash="d046f952759ff6987374786768fc588740eef1e54e4e295a684f3bd356c8528f",
         path=str(pooch.os_cache("pooch")) + os.sep + "wsi",
     )
-    print(f"Retrieved {wsi_path} in {time.perf_counter() - start_time}s", flush=True)
+    print(f"Retrieved {wsi_path} in {time.time() - start_time}s", flush=True)
 
     # download binary mask image
-    start_time = time.perf_counter()
+    start_time = time.time()
     mask_path = pooch.retrieve(
         fname="TCGA-AN-A0G0-01Z-00-DX1.mask.png",
         url="https://drive.google.com/uc"
@@ -75,25 +73,24 @@ def get_data():
         known_hash="bb657ead9fd3b8284db6ecc1ca8a1efa57a0e9fd73d2ea63ce6053fbd3d65171",
         path=str(pooch.os_cache("pooch")) + os.sep + "wsi",
     )
-    print(f"Retrieved {mask_path} in {time.perf_counter() - start_time}s", flush=True)
+    print(f"Retrieved {mask_path} in {time.time() - start_time}s", flush=True)
     return wsi_path, mask_path
 
 
-class WrapModel(torch.nn.modules.module.Module):
-    def __init__(self, model, preprocess_fn, *args, **kwargs):
-        super(WrapModel, self).__init__(*args, **kwargs)
-        self.model = model
-        self.preprocess_fn = preprocess_fn
+class WrappedModel(torch.nn.modules.module.Module):
+    def __init__(self, model, preprocess_fn, *args, device="cuda", **kwargs):
+        super(WrappedModel, self).__init__(*args, **kwargs)
+        self.device = torch.device(device)
+        self.model = model.to(self.device)
+        self.preprocess_fn = preprocess_fn.to(self.device)
 
     def forward(self, x):
-        # Why do we need [0, ...] here?!!!
-        p = self.model(self.preprocess_fn(x[0][0, ...]).unsqueeze(0))
-        # p = self.model(self.preprocess_fn(x[0][0, ...].cuda()).unsqueeze(0))
+        p = self.model(self.preprocess_fn(x[0].to(self.device)))
         return p, x[1]
 
 
-def build_model(training_batch, epochs):
-    start_time = time.perf_counter()
+def build_model(device="cuda"):
+    start_time = time.time()
     # print(f"available_models = {repr(sorted(torchvision.models.list_models()))}")
     weights = torchvision.models.EfficientNet_V2_S_Weights.DEFAULT
     model = torchvision.models.efficientnet_v2_s(weights=weights)
@@ -101,14 +98,14 @@ def build_model(training_batch, epochs):
     preprocess_fn = weights.transforms()
 
     unwrapped_model = model
-    model = WrapModel(unwrapped_model, preprocess_fn)
+    model = WrappedModel(unwrapped_model, preprocess_fn, device=device).to(device)
 
-    print(f"Finished model in {time.perf_counter() - start_time}s", flush=True)
+    print(f"Finished model in {time.time() - start_time}s", flush=True)
     return unwrapped_model, model
 
 
 def create_study(wsi_path, mask_path, chunk_size):
-    start_time = time.perf_counter()
+    start_time = time.time()
     slide_name = os.path.splitext(os.path.split(wsi_path)[1])[0]
     slide_group = "Group 3"
 
@@ -116,8 +113,8 @@ def create_study(wsi_path, mask_path, chunk_size):
         version="version-1",
         tile_height=224,
         tile_width=224,
-        overlap_height=0,
-        overlap_width=0,
+        overlap_height=196,
+        overlap_width=196,
         slides=dict(
             Slide_0=dict(
                 filename=wsi_path,
@@ -140,13 +137,13 @@ def create_study(wsi_path, mask_path, chunk_size):
     for slide in study["slides"].values():
         find_slide_resolution(slide)
         tiles_by_grid_and_mask(slide)
-    print(f"Masked study in {time.perf_counter() - start_time}s", flush=True)
+    print(f"Masked study in {time.time() - start_time}s", flush=True)
 
-    start_time = time.perf_counter()
+    start_time = time.time()
     create_torch_dataloader = hs.pytorch.CreateTorchDataloader()
     tiles = create_torch_dataloader(study)
     print(f"#tiles = {len(create_torch_dataloader.get_tiles(study)[0][1])}")
-    print(f"Chunked study in {time.perf_counter() - start_time}s", flush=True)
+    print(f"Chunked study in {time.time() - start_time}s", flush=True)
 
     return study, tiles
 
@@ -174,7 +171,7 @@ def predict(take_predictions, prediction_batch, model, tiles):
     category_name = weights.meta["categories"][class_id]
     """
 
-    start_time = time.perf_counter()
+    start_time = time.time()
 
     if take_predictions > 0:
         tiles = itertools.islice(tiles, take_predictions)
@@ -192,20 +189,19 @@ def predict(take_predictions, prediction_batch, model, tiles):
         predictions.extend(batch_predictions)
     del batch_predictions, batch
 
-    print(f"Made predictions in {time.perf_counter() - start_time}s", flush=True)
+    print(f"Made predictions in {time.time() - start_time}s", flush=True)
     return predictions
 
 
 if __name__ == "__main__":
-    print("***** device = CPU *****")
-    training_batch = 2**7
-    num_epochs = 6
-    take_predictions = 2**8 if False else 0
+    device = "cuda"
+    print(f"***** device = {device} *****")
+    take_predictions = 2**10 if False else 0
 
     wsi_path, mask_path = get_data()
-    unwrapped_model, model = build_model(training_batch, num_epochs)
+    unwrapped_model, model = build_model(device=device)
 
-    for prediction_batch in [2**j for j in range(0, 9)]:
+    for prediction_batch in [2**j for j in range(0, 6)]:
         for chunk_size in [256] + [2**j for j in range(8, 14)]:
             print(
                 f"***** chunk_size = {chunk_size},"
@@ -215,4 +211,4 @@ if __name__ == "__main__":
             )
             study, tiles = create_study(wsi_path, mask_path, chunk_size)
             predictions = predict(take_predictions, prediction_batch, model, tiles)
-    print("***** Finished with device = CPU *****")
+    print(f"***** Finished with device = {device} *****")

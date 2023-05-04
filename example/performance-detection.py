@@ -16,12 +16,6 @@
 #
 # =========================================================================
 
-"""
-This is a script that is used to make timings of histomics_stream.  To some extent, it
-may be specific to the computer / docker image it is used with and need minor tweaks to
-run on another computer.
-"""
-
 import histomics_stream as hs
 import histomics_stream.tensorflow
 import os
@@ -30,7 +24,14 @@ import tensorflow as tf
 import time
 
 """
+This is a script that is used to make timings of histomics_stream.  To some extent, it
+may be specific to the computer / docker image it is used with and need minor tweaks to
+run on another computer.
+"""
+
+"""
 # If you've just started a fresh docker container you may need some of this:
+apt update ; apt install -y git emacs ; \
 rm -rf /.local ; \
 pip install -U pip setuptools wheel ; \
 pip install \
@@ -127,8 +128,8 @@ def create_study(wsi_path, mask_path, chunk_size):
         version="version-1",
         tile_height=256,
         tile_width=256,
-        overlap_height=64,
-        overlap_width=64,
+        overlap_height=192,
+        overlap_width=192,
         slides=dict(
             Slide_0=dict(
                 filename=wsi_path,
@@ -182,14 +183,14 @@ if True:
 
 # if __name__ == "__main__":
 with tf.device(gpus[0]):
-    print("***** device = GPU *****")
+    device = "cuda"
+    print(f"***** device = {device} *****")
     take_predictions = 2**17 if False else 0
-
     wsi_path, mask_path = get_data()
     unwrapped_model, model = build_model()
 
     for prediction_batch in (1,):
-        for chunk_size in [2**j for j in range(8, 14)]:
+        for chunk_size in [256] + [2**j for j in range(8, 14)]:
             print(
                 f"***** chunk_size = {chunk_size},"
                 f" prediction_batch = {prediction_batch},"
@@ -198,4 +199,4 @@ with tf.device(gpus[0]):
             )
             study, tiles = create_study(wsi_path, mask_path, chunk_size)
             predictions = predict(take_predictions, prediction_batch, model, tiles)
-    print("***** Finished with device = GPU *****")
+    print(f"***** Finished with device = {device} *****")

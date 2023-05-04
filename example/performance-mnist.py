@@ -16,12 +16,6 @@
 #
 # =========================================================================
 
-"""
-This is a script that is used to make timings of histomics_stream.  To some extent, it
-may be specific to the computer / docker image it is used with and need minor tweaks to
-run on another computer.
-"""
-
 import histomics_stream as hs
 import histomics_stream.tensorflow
 import os
@@ -31,7 +25,14 @@ import tensorflow_datasets as tfds
 import time
 
 """
+This is a script that is used to make timings of histomics_stream.  To some extent, it
+may be specific to the computer / docker image it is used with and need minor tweaks to
+run on another computer.
+"""
+
+"""
 # If you've just started a fresh docker container you may need some of this:
+apt update ; apt install -y git emacs ; \
 rm -rf /.local ; \
 pip install -U pip setuptools wheel ; \
 pip install \
@@ -202,7 +203,8 @@ if True:
 
 # if __name__ == "__main__":
 with tf.device(gpus[0]):
-    print("***** device = GPU *****")
+    device = "cuda"
+    print(f"***** device = {device} *****")
     training_batch = 2**7
     num_epochs = 6
     take_predictions = 2**17 if False else 0
@@ -220,4 +222,4 @@ with tf.device(gpus[0]):
             )
             study, tiles = create_study(wsi_path, mask_path, chunk_size)
             predictions = predict(take_predictions, prediction_batch, model, tiles)
-    print("***** Finished with device = GPU *****")
+    print(f"***** Finished with device = {device} *****")
