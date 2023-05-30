@@ -25,6 +25,7 @@ import os
 import pooch
 import time
 import torch
+import torch.multiprocessing as mp
 import torchvision
 
 """
@@ -106,7 +107,7 @@ def build_model(device="cuda"):
     return unwrapped_model, model
 
 
-def create_study(wsi_path, mask_path, chunk_size):
+def create_study(wsi_path, mask_path, chunk_size, num_workers=None, worker_index=None):
     start_time = time.time()
     slide_name = os.path.splitext(os.path.split(wsi_path)[1])[0]
     slide_group = "Group 3"
@@ -143,7 +144,7 @@ def create_study(wsi_path, mask_path, chunk_size):
 
     start_time = time.time()
     create_torch_dataloader = hs.pytorch.CreateTorchDataloader()
-    tiles = create_torch_dataloader(study)
+    tiles = create_torch_dataloader(study, num_workers, worker_index)
     print(f"#tiles = {len(create_torch_dataloader.get_tiles(study)[0][1])}")
     print(f"Chunked study in {time.time() - start_time}s", flush=True)
 
@@ -181,45 +182,69 @@ def batched(iterable, batch_size):
     Batch data into lists of length batch_size. The last batch may be shorter:
     batched('ABCDEFG', 3) --> ABC DEF G
     """
+    print("batched() - 1")
     iterator = iter(iterable)
+    print("batched() - 2")
     batch = list(itertools.islice(iterator, batch_size))
+    print("batched() - 3")
     while batch:
+        print("batched() - 4")
         yield batch
+        print("batched() - 5")
         batch = list(itertools.islice(iterator, batch_size))
+        print("batched() - 6")
+    print("batched() - 7")
     return
 
 
-def predict_and_retreive(model, item):
+def predict_and_detach(model, item):
+    print("Predicting an item")
     predict = model(item)
     return predict[0].detach().cpu().numpy(), predict[1]
 
 
 def predict(take_predictions, prediction_batch, model, tiles):
-    """
-    # Perhaps useful somewhere
-    batch = preprocess_fn(img).unsqueeze(0)
-    prediction = model(batch).squeeze(0).softmax(0)
-    class_id = prediction.argmax().item()
-    score = prediction[class_id].item()
-    category_name = weights.meta["categories"][class_id]
-    """
+    if isinstance(tiles, list):
+        model.share_memory()
+        processes = []
+        for t in tiles:
+            p = mp.Process(
+                target=predict, args=(take_predictions, prediction_batch, model, t)
+            )
+            p.start()
+            processes.append(p)
+        for p in processes:
+            p.join()
+        return
 
     start_time = time.time()
+    print("predict() - 0")
+    print(f"{type(tiles) = }")
 
     if take_predictions > 0:
+        print("predict() - 1")
         tiles = itertools.islice(tiles, take_predictions)
+        print("predict() - 2")
 
+    print("predict() - 3")
     batched_tiles = (
-        batched(tiles, prediction_batch) if prediction_batch > 1 else [tiles]
+        batched(tiles, prediction_batch) if prediction_batch > 0 else [tiles]
     )
+    print(f"{type(batched_tiles) = }")
+    print(f"{type(batched_tiles[0]) = }")
+    print("predict() - 4")
 
     predictions = list()
+    print("predict() - 5")
     for batch in batched_tiles:
-        batch_predictions = [predict_and_retreive(model, item) for item in batch]
-        # !!! Should we be changing batch_predictions to be organized by columns
-        # !!! (including stacking the batch's numpy arrays) and then `append` (rather
-        # !!! than `extend`) to predictions?
+        print("predict() - 6")
+        print(f"{type(batch) = }")
+        print(f"{len([x for x in batch])}")
+        batch_predictions = [predict_and_detach(model, item) for item in batch]
+        print("predict() - 7")
         predictions.extend(batch_predictions)
+        print("predict() - 8")
+    print("predict() - 9")
     del batch_predictions, batch
 
     print(f"Made predictions in {time.time() - start_time}s", flush=True)
@@ -228,17 +253,19 @@ def predict(take_predictions, prediction_batch, model, tiles):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('device')
+    parser.add_argument("device")
     args = parser.parse_args()
     device = args.device
     # device = "cuda" if True else "cpu"
     print(f"***** device = {device} *****")
-    take_predictions = 2**10 if False else 0
+    take_predictions = 2**0 if True else 0
 
     wsi_path, mask_path = get_data()
     unwrapped_model, model = build_model(device=device)
 
-    for prediction_batch in [2**j for j in range(0, 6)]:
+    # for prediction_batch in [2**j for j in range(0, 6)]:
+    num_workers = 1
+    for prediction_batch in [0]:
         for chunk_size in [1024] + [2**j for j in range(8, 14)]:
             print(
                 f"***** chunk_size = {chunk_size},"
@@ -246,7 +273,9 @@ if __name__ == "__main__":
                 f" take_predictions = {take_predictions} ****",
                 flush=True,
             )
-            study, tiles = create_study(wsi_path, mask_path, chunk_size)
+            study, tiles = create_study(
+                wsi_path, mask_path, chunk_size, num_workers=num_workers
+            )
             predictions = predict(take_predictions, prediction_batch, model, tiles)
             print(f"show_structure(predictions) = {show_structure(predictions)}")
     print(f"***** Finished with device = {device} *****")
