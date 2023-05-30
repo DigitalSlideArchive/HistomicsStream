@@ -42,7 +42,9 @@ https://blog.paperspace.com/dataloaders-abstractions-pytorch/
 
 class CreateTorchDataloader(configure.ChunkLocations):
     class MyDataset(torch.utils.data.IterableDataset, configure._TilesByCommon):
-        def __init__(self, study_description):
+        def __init__(self, study_description, num_workers=None, worker_index=None):
+            num_workers = num_workers if num_workers is not None else 1
+            worker_index = worker_index if worker_index is not None else 0
             configure._TilesByCommon.__init__(self)
             """Store in self the data or pointers to it"""
             # Update keys of the dictionary from deprecated names
@@ -179,14 +181,16 @@ class CreateTorchDataloader(configure.ChunkLocations):
         # !!! Instead, get `batch_size` from somewhere
         self.batch_size = 1
 
-    def __call__(self, study_description):
+    def __call__(self, study_description, num_workers=None, worker_index=None):
         """
         From scratch, creates a torch dataloader with one torch element per tile
         """
         # Call to superclass to find the locations for the chunks
-        configure.ChunkLocations.__call__(self, study_description)
+        # configure.ChunkLocations.__call__(self, study_description)
+        # super(CreateTorchDataloader, self).__call__(study_description)
+        super().__call__(study_description)
 
-        my_dataset = self.MyDataset(study_description)
+        my_dataset = self.MyDataset(study_description, num_workers, worker_index)
         # !!! DataLoader has additional parameters that we may wish to use
         my_data_loader = torch.utils.data.DataLoader(
             my_dataset, batch_size=self.batch_size

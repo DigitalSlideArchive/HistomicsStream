@@ -79,12 +79,12 @@ def get_data():
 
 
 class WrappedModel(tf.keras.Model):
-    def __init__(self, model, *args, **kwargs):
+    def __init__(self, unwrapped_model, *args, **kwargs):
         super(WrappedModel, self).__init__(*args, **kwargs)
-        self.model = model
+        self.unwrapped_model = unwrapped_model
 
     def call(self, element):
-        return (self.model(element[0]), element[1])
+        return self.unwrapped_model(element[0]), element[1]
 
 
 def normalize_img(image, label):
@@ -94,21 +94,20 @@ def normalize_img(image, label):
 
 def build_model(training_batch, epochs):
     start_time = time.time()
-    model = tf.keras.applications.efficientnet_v2.EfficientNetV2S(
+    unwrapped_model = tf.keras.applications.efficientnet_v2.EfficientNetV2S(
         include_top=False, weights="imagenet", input_shape=(224, 224, 3), pooling="avg"
     )
-    model.compile(
+    unwrapped_model.compile(
         optimizer=tf.keras.optimizers.Adam(0.001),
         loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
         metrics=[tf.keras.metrics.SparseCategoricalAccuracy()],
     )
-    # model.fit(ds_train, epochs=epochs, validation_data=ds_test)
+    # unwrapped_model.fit(ds_train, epochs=epochs, validation_data=ds_test)
 
-    unwrapped_model = model
-    model = WrappedModel(unwrapped_model)
+    wrapped_model = WrappedModel(unwrapped_model)
 
     print(f"Finished model in {time.time() - start_time}s", flush=True)
-    return unwrapped_model, model
+    return unwrapped_model, wrapped_model
 
 
 def create_study(wsi_path, mask_path, chunk_size):
@@ -175,7 +174,7 @@ if True:
 
 # if __name__ == "__main__":
 with tf.device(gpus[0]):
-    device = "cuda"
+    device = "gpu" if True else "cpu"
     print(f"***** device = {device} *****")
     training_batch = 2**7
     num_epochs = 6

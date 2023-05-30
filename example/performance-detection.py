@@ -80,12 +80,12 @@ def get_data():
 
 
 class WrappedModel(tf.keras.Model):
-    def __init__(self, model, *args, **kwargs):
+    def __init__(self, unwrapped_model, *args, **kwargs):
         super(WrappedModel, self).__init__(*args, **kwargs)
-        self.model = model
+        self.unwrapped_model = unwrapped_model
 
     def call(self, element):
-        return (self.model(element[0]), element[1])
+        return self.unwrapped_model(element[0]), element[1]
 
 
 def build_model():

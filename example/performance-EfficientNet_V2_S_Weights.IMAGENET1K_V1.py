@@ -16,9 +16,11 @@
 #
 # =========================================================================
 
+import argparse
 import histomics_stream as hs
 import histomics_stream.pytorch
 import itertools
+import numpy as np
 import os
 import pooch
 import time
@@ -113,8 +115,8 @@ def create_study(wsi_path, mask_path, chunk_size):
         version="version-1",
         tile_height=224,
         tile_width=224,
-        overlap_height=196,
-        overlap_width=196,
+        overlap_height=0,
+        overlap_width=0,
         slides=dict(
             Slide_0=dict(
                 filename=wsi_path,
@@ -148,17 +150,48 @@ def create_study(wsi_path, mask_path, chunk_size):
     return study, tiles
 
 
+def show_structure(x):
+    if isinstance(x, list):
+        if len(x) > 0:
+            return f"[{len(x)} of {show_structure(x[0])}]"
+        else:
+            return repr(list())
+    if isinstance(x, tuple):
+        if len(x) > 0:
+            return f"({len(x)} of {show_structure(x[0])})"
+        else:
+            return repr(tuple())
+    if isinstance(x, set):
+        if len(x) > 0:
+            return f"{{{len(x)} of {show_structure(next(iter(x)))}}}"
+        else:
+            return repr(set())
+    if isinstance(x, dict):
+        if len(x) > 0:
+            return f"{{{len(x)} of {show_structure(next(iter(x.keys())))}: {show_structure(next(iter(x.values())))}}}"
+        else:
+            return repr(dict())
+    if isinstance(x, np.ndarray):
+        return f"numpy.ndarray.shape={x.shape} of np.{x.dtype}"
+    return repr(type(x))
+
+
 def batched(iterable, batch_size):
     """
     Batch data into lists of length batch_size. The last batch may be shorter:
     batched('ABCDEFG', 3) --> ABC DEF G
     """
     iterator = iter(iterable)
-    while True:
-        batch = list(itertools.islice(iterator, batch_size))
-        if not batch:
-            return
+    batch = list(itertools.islice(iterator, batch_size))
+    while batch:
         yield batch
+        batch = list(itertools.islice(iterator, batch_size))
+    return
+
+
+def predict_and_retreive(model, item):
+    predict = model(item)
+    return predict[0].detach().cpu().numpy(), predict[1]
 
 
 def predict(take_predictions, prediction_batch, model, tiles):
@@ -175,14 +208,14 @@ def predict(take_predictions, prediction_batch, model, tiles):
 
     if take_predictions > 0:
         tiles = itertools.islice(tiles, take_predictions)
-    batched_tiles = batched(tiles, prediction_batch)
+
+    batched_tiles = (
+        batched(tiles, prediction_batch) if prediction_batch > 1 else [tiles]
+    )
 
     predictions = list()
     for batch in batched_tiles:
-        batch_predictions = [model(item) for item in batch]
-        batch_predictions = [
-            (pred[0].detach().cpu().numpy(), pred[1]) for pred in batch_predictions
-        ]
+        batch_predictions = [predict_and_retreive(model, item) for item in batch]
         # !!! Should we be changing batch_predictions to be organized by columns
         # !!! (including stacking the batch's numpy arrays) and then `append` (rather
         # !!! than `extend`) to predictions?
@@ -194,7 +227,11 @@ def predict(take_predictions, prediction_batch, model, tiles):
 
 
 if __name__ == "__main__":
-    device = "cuda"
+    parser = argparse.ArgumentParser()
+    parser.add_argument('device')
+    args = parser.parse_args()
+    device = args.device
+    # device = "cuda" if True else "cpu"
     print(f"***** device = {device} *****")
     take_predictions = 2**10 if False else 0
 
@@ -202,7 +239,7 @@ if __name__ == "__main__":
     unwrapped_model, model = build_model(device=device)
 
     for prediction_batch in [2**j for j in range(0, 6)]:
-        for chunk_size in [256] + [2**j for j in range(8, 14)]:
+        for chunk_size in [1024] + [2**j for j in range(8, 14)]:
             print(
                 f"***** chunk_size = {chunk_size},"
                 f" prediction_batch = {prediction_batch},"
@@ -211,4 +248,5 @@ if __name__ == "__main__":
             )
             study, tiles = create_study(wsi_path, mask_path, chunk_size)
             predictions = predict(take_predictions, prediction_batch, model, tiles)
+            print(f"show_structure(predictions) = {show_structure(predictions)}")
     print(f"***** Finished with device = {device} *****")
