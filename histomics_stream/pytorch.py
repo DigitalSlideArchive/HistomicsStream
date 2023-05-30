@@ -43,8 +43,8 @@ https://blog.paperspace.com/dataloaders-abstractions-pytorch/
 class CreateTorchDataloader(configure.ChunkLocations):
     class MyDataset(torch.utils.data.IterableDataset, configure._TilesByCommon):
         def __init__(self, study_description, num_workers=None, worker_index=None):
-            num_workers = num_workers if num_workers is not None else 1
-            worker_index = worker_index if worker_index is not None else 0
+            self.num_workers = num_workers if num_workers is not None else 1
+            self.worker_index = worker_index if worker_index is not None else 0
             configure._TilesByCommon.__init__(self)
             """Store in self the data or pointers to it"""
             # Update keys of the dictionary from deprecated names
@@ -64,6 +64,7 @@ class CreateTorchDataloader(configure.ChunkLocations):
             def my_iterable():
                 """This is the iterable that we will return"""
                 study_description = self.study_description
+                num_chunks = 0
                 study_dict = {
                     # !!! Is it better to have the dictionary values be length-one
                     # !!! lists, here and below?
@@ -94,6 +95,12 @@ class CreateTorchDataloader(configure.ChunkLocations):
                     )
 
                     for chunk_description in slide_description["chunks"].values():
+                        if num_chunks % self.num_workers != self.worker_index:
+                            # This chunk is not included in this shard.
+                            num_chunks += 1
+                            continue
+                        # This chunk is included in this shard.
+                        num_chunks += 1
                         chunk_dict = {
                             **slide_dict,
                             **{
@@ -162,12 +169,17 @@ class CreateTorchDataloader(configure.ChunkLocations):
                             ]
 
                             # Yield the pixel data as a tensor and the Python dict of
-                            # associated information
-                            yield scaled_tile_pixels, tile_dict
-
-                            # Clean up memory-intensive variables that were created in
-                            # this loop iteration
+                            # associated information.  Rather than `yield
+                            # scaled_tile_pixels, tile_dict` we use lists and pop() so
+                            # that this iterator does not maintain a reference count for
+                            # the returned objects.
+                            pixels_in_list = [scaled_tile_pixels]
+                            dict_in_list = [tile_dict]
                             del scaled_tile_pixels, tile_dict
+                            yield pixels_in_list.pop(), dict_in_list.pop()
+
+                        # Clean up memory-intensive variables that were created in this
+                        # loop iteration
                         del scaled_chunk_pixels, chunk_dict
                     del slide_dict
                 del study_dict
@@ -186,8 +198,6 @@ class CreateTorchDataloader(configure.ChunkLocations):
         From scratch, creates a torch dataloader with one torch element per tile
         """
         # Call to superclass to find the locations for the chunks
-        # configure.ChunkLocations.__call__(self, study_description)
-        # super(CreateTorchDataloader, self).__call__(study_description)
         super().__call__(study_description)
 
         my_dataset = self.MyDataset(study_description, num_workers, worker_index)
