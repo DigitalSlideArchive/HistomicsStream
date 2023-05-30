@@ -63,6 +63,7 @@ class CreateTorchDataloader(configure.ChunkLocations):
 
             def my_iterable():
                 """This is the iterable that we will return"""
+                print("Starting my_iterable")
                 study_description = self.study_description
                 num_chunks = 0
                 study_dict = {
@@ -75,6 +76,7 @@ class CreateTorchDataloader(configure.ChunkLocations):
                     if key != "slides"
                 }
                 for slide_description in study_description["slides"].values():
+                    print("  Starting slide")
                     slide_dict = {
                         **study_dict,
                         **{
@@ -95,11 +97,14 @@ class CreateTorchDataloader(configure.ChunkLocations):
                     )
 
                     for chunk_description in slide_description["chunks"].values():
+                        print("    Starting chunk")
                         if num_chunks % self.num_workers != self.worker_index:
                             # This chunk is not included in this shard.
                             num_chunks += 1
+                            print("      Abandoning chunk")
                             continue
                         # This chunk is included in this shard.
+                        print("      Keeping chunk")
                         num_chunks += 1
                         chunk_dict = {
                             **slide_dict,
@@ -141,6 +146,7 @@ class CreateTorchDataloader(configure.ChunkLocations):
                         scaled_chunk_pixels = torch.from_numpy(scaled_chunk_pixels)
 
                         for tile_description in chunk_description["tiles"].values():
+                            print("      Starting tile")
                             tile_dict = {
                                 **chunk_dict,
                                 **{
@@ -173,16 +179,15 @@ class CreateTorchDataloader(configure.ChunkLocations):
                             # scaled_tile_pixels, tile_dict` we use lists and pop() so
                             # that this iterator does not maintain a reference count for
                             # the returned objects.
+                            print("        my_iterator yielding")
                             pixels_in_list = [scaled_tile_pixels]
                             dict_in_list = [tile_dict]
                             del scaled_tile_pixels, tile_dict
                             yield pixels_in_list.pop(), dict_in_list.pop()
-
-                        # Clean up memory-intensive variables that were created in this
-                        # loop iteration
-                        del scaled_chunk_pixels, chunk_dict
-                    del slide_dict
-                del study_dict
+                            """
+                            yield scaled_tile_pixels, tile_dict
+                            """
+                            print("        my_iterator resuming after yield")
 
             """Return this generator (iterable) over the tiles"""
             return my_iterable()

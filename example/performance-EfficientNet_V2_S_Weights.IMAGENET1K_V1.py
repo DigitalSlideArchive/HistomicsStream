@@ -147,7 +147,6 @@ def create_study(wsi_path, mask_path, chunk_size, num_workers=None, worker_index
     tiles = create_torch_dataloader(study, num_workers, worker_index)
     print(f"#tiles = {len(create_torch_dataloader.get_tiles(study)[0][1])}")
     print(f"Chunked study in {time.time() - start_time}s", flush=True)
-
     return study, tiles
 
 
@@ -182,73 +181,59 @@ def batched(iterable, batch_size):
     Batch data into lists of length batch_size. The last batch may be shorter:
     batched('ABCDEFG', 3) --> ABC DEF G
     """
-    print("batched() - 1")
     iterator = iter(iterable)
-    print("batched() - 2")
+    # !!! Can we get rid of `list` here and a few lines below?  It is used so that we
+    # !!! can detect an empty list with `while`.
     batch = list(itertools.islice(iterator, batch_size))
-    print("batched() - 3")
     while batch:
-        print("batched() - 4")
-        yield batch
-        print("batched() - 5")
+        # Yield `batch` in such a way that this iterator does not keep a reference count
+        # for it.
+        batch_in_list = [batch]
+        del batch
+        yield batch_in_list.pop()
         batch = list(itertools.islice(iterator, batch_size))
-        print("batched() - 6")
-    print("batched() - 7")
-    return
 
 
 def predict_and_detach(model, item):
-    print("Predicting an item")
     predict = model(item)
     return predict[0].detach().cpu().numpy(), predict[1]
 
 
 def predict(take_predictions, prediction_batch, model, tiles):
-    if isinstance(tiles, list):
-        model.share_memory()
-        processes = []
-        for t in tiles:
-            p = mp.Process(
-                target=predict, args=(take_predictions, prediction_batch, model, t)
-            )
-            p.start()
-            processes.append(p)
-        for p in processes:
-            p.join()
-        return
-
     start_time = time.time()
-    print("predict() - 0")
-    print(f"{type(tiles) = }")
-
     if take_predictions > 0:
-        print("predict() - 1")
         tiles = itertools.islice(tiles, take_predictions)
-        print("predict() - 2")
-
-    print("predict() - 3")
     batched_tiles = (
         batched(tiles, prediction_batch) if prediction_batch > 0 else [tiles]
     )
-    print(f"{type(batched_tiles) = }")
-    print(f"{type(batched_tiles[0]) = }")
-    print("predict() - 4")
-
     predictions = list()
-    print("predict() - 5")
     for batch in batched_tiles:
-        print("predict() - 6")
-        print(f"{type(batch) = }")
-        print(f"{len([x for x in batch])}")
         batch_predictions = [predict_and_detach(model, item) for item in batch]
-        print("predict() - 7")
         predictions.extend(batch_predictions)
-        print("predict() - 8")
-    print("predict() - 9")
     del batch_predictions, batch
-
     print(f"Made predictions in {time.time() - start_time}s", flush=True)
     return predictions
+
+
+def create_and_predict(
+    wsi_path,
+    mask_path,
+    chunk_size,
+    num_workers,
+    worker_index,
+    take_predictions,
+    prediction_batch,
+    model,
+):
+    study, tiles = create_study(
+        wsi_path,
+        mask_path,
+        chunk_size,
+        num_workers=num_workers,
+        worker_index=worker_index,
+    )
+    predictions = predict(take_predictions, prediction_batch, model, tiles)
+    print(f"show_structure(predictions) = {show_structure(predictions)}")
 
 
 if __name__ == "__main__":
@@ -258,13 +243,15 @@ if __name__ == "__main__":
     device = args.device
     # device = "cuda" if True else "cpu"
     print(f"***** device = {device} *****")
-    take_predictions = 2**0 if True else 0
+    take_predictions = 2**1 if True else 0
 
+    num_workers = None
     wsi_path, mask_path = get_data()
     unwrapped_model, model = build_model(device=device)
+    if num_workers is not None:
+        model.share_memory()
 
     # for prediction_batch in [2**j for j in range(0, 6)]:
-    num_workers = 1
     for prediction_batch in [0]:
         for chunk_size in [1024] + [2**j for j in range(8, 14)]:
             print(
@@ -273,9 +260,35 @@ if __name__ == "__main__":
                 f" take_predictions = {take_predictions} ****",
                 flush=True,
             )
-            study, tiles = create_study(
-                wsi_path, mask_path, chunk_size, num_workers=num_workers
-            )
-            predictions = predict(take_predictions, prediction_batch, model, tiles)
-            print(f"show_structure(predictions) = {show_structure(predictions)}")
+            if num_workers is None:
+                create_and_predict(
+                    wsi_path,
+                    mask_path,
+                    chunk_size,
+                    None,
+                    None,
+                    take_predictions,
+                    prediction_batch,
+                    model,
+                )
+            else:
+                processes = []
+                for worker_index in range(num_workers):
+                    p = mp.Process(
+                        target=create_and_predict,
+                        args=(
+                            wsi_path,
+                            mask_path,
+                            chunk_size,
+                            num_workers,
+                            worker_index,
+                            take_predictions,
+                            prediction_batch,
+                            model,
+                        ),
+                    )
+                    p.start()
+                    processes.append(p)
+                for p in processes:
+                    p.join()
     print(f"***** Finished with device = {device} *****")
