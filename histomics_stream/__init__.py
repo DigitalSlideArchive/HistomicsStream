@@ -18,7 +18,7 @@
 
 """Whole-slide image streamer for machine learning frameworks."""
 
-__version__ = "2.3.3"
+__version__ = "2.4.0"
 
 """
 
