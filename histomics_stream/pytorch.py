@@ -42,10 +42,17 @@ https://blog.paperspace.com/dataloaders-abstractions-pytorch/
 
 class CreateTorchDataloader(configure.ChunkLocations):
     class MyDataset(torch.utils.data.IterableDataset, configure._TilesByCommon):
-        def __init__(self, study_description, num_workers=None, worker_index=None):
-            self.num_workers = num_workers if num_workers is not None else 1
-            self.worker_index = worker_index if worker_index is not None else 0
+        def __init__(self, study_description):
             configure._TilesByCommon.__init__(self)
+            torch.utils.data.IterableDataset.__init__(self)
+            worker_info = torch.utils.data.get_worker_info()
+            if worker_info is None:
+                self.num_workers = 1
+                self.worker_index = 0
+            else:
+                self.num_workers = worker_info.num_workers
+                self.worker_index = worker_info.id
+                print(f"{worker_info.id = }")
             """Store in self the data or pointers to it"""
             # Update keys of the dictionary from deprecated names
             self._update_dict(study_description)
@@ -198,17 +205,18 @@ class CreateTorchDataloader(configure.ChunkLocations):
         # !!! Instead, get `batch_size` from somewhere
         self.batch_size = 1
 
-    def __call__(self, study_description, num_workers=None, worker_index=None):
+    def __call__(self, study_description, num_workers=None):
         """
         From scratch, creates a torch dataloader with one torch element per tile
         """
         # Call to superclass to find the locations for the chunks
         super().__call__(study_description)
+        num_workers = 0 if num_workers is None else num_workers
 
-        my_dataset = self.MyDataset(study_description, num_workers, worker_index)
+        my_dataset = self.MyDataset(study_description)
         # !!! DataLoader has additional parameters that we may wish to use
         my_data_loader = torch.utils.data.DataLoader(
-            my_dataset, batch_size=self.batch_size
+            my_dataset, batch_size=self.batch_size, num_workers=num_workers
         )
 
         return my_data_loader

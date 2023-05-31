@@ -107,8 +107,9 @@ def build_model(device="cuda"):
     return unwrapped_model, model
 
 
-def create_study(wsi_path, mask_path, chunk_size, num_workers=None, worker_index=None):
+def create_study(wsi_path, mask_path, chunk_size, num_workers):
     start_time = time.time()
+    print("Starting create_study()")
     slide_name = os.path.splitext(os.path.split(wsi_path)[1])[0]
     slide_group = "Group 3"
 
@@ -144,7 +145,7 @@ def create_study(wsi_path, mask_path, chunk_size, num_workers=None, worker_index
 
     start_time = time.time()
     create_torch_dataloader = hs.pytorch.CreateTorchDataloader()
-    tiles = create_torch_dataloader(study, num_workers, worker_index)
+    tiles = create_torch_dataloader(study, num_workers=num_workers)
     print(f"#tiles = {len(create_torch_dataloader.get_tiles(study)[0][1])}")
     print(f"Chunked study in {time.time() - start_time}s", flush=True)
     return study, tiles
@@ -188,9 +189,12 @@ def batched(iterable, batch_size):
     while batch:
         # Yield `batch` in such a way that this iterator does not keep a reference count
         # for it.
+        """
         batch_in_list = [batch]
         del batch
         yield batch_in_list.pop()
+        """
+        yield batch
         batch = list(itertools.islice(iterator, batch_size))
 
 
@@ -201,6 +205,7 @@ def predict_and_detach(model, item):
 
 def predict(take_predictions, prediction_batch, model, tiles):
     start_time = time.time()
+    print("Starting predict()")
     if take_predictions > 0:
         tiles = itertools.islice(tiles, take_predictions)
     batched_tiles = (
@@ -208,8 +213,10 @@ def predict(take_predictions, prediction_batch, model, tiles):
     )
     predictions = list()
     for batch in batched_tiles:
+        print("Starting predict batch")
         batch_predictions = [predict_and_detach(model, item) for item in batch]
         predictions.extend(batch_predictions)
+        print("Finished predict batch")
     del batch_predictions, batch
     print(f"Made predictions in {time.time() - start_time}s", flush=True)
     return predictions
@@ -220,17 +227,12 @@ def create_and_predict(
     mask_path,
     chunk_size,
     num_workers,
-    worker_index,
     take_predictions,
     prediction_batch,
     model,
 ):
     study, tiles = create_study(
-        wsi_path,
-        mask_path,
-        chunk_size,
-        num_workers=num_workers,
-        worker_index=worker_index,
+        wsi_path, mask_path, chunk_size, num_workers=num_workers
     )
     predictions = predict(take_predictions, prediction_batch, model, tiles)
     print(f"show_structure(predictions) = {show_structure(predictions)}")
@@ -240,12 +242,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("device")
     args = parser.parse_args()
-    device = args.device
     # device = "cuda" if True else "cpu"
+    device = args.device
     print(f"***** device = {device} *****")
-    take_predictions = 2**1 if True else 0
+    take_predictions = 2**0 if True else 0
 
-    num_workers = None
+    num_workers = 2
     wsi_path, mask_path = get_data()
     unwrapped_model, model = build_model(device=device)
     if num_workers is not None:
@@ -266,7 +268,6 @@ if __name__ == "__main__":
                     mask_path,
                     chunk_size,
                     None,
-                    None,
                     take_predictions,
                     prediction_batch,
                     model,
@@ -281,14 +282,14 @@ if __name__ == "__main__":
                             mask_path,
                             chunk_size,
                             num_workers,
-                            worker_index,
                             take_predictions,
                             prediction_batch,
                             model,
                         ),
                     )
-                    p.start()
                     processes.append(p)
+                    p.start()
                 for p in processes:
+                    print("Joining")
                     p.join()
     print(f"***** Finished with device = {device} *****")
