@@ -45,14 +45,6 @@ class CreateTorchDataloader(configure.ChunkLocations):
         def __init__(self, study_description):
             configure._TilesByCommon.__init__(self)
             torch.utils.data.IterableDataset.__init__(self)
-            worker_info = torch.utils.data.get_worker_info()
-            if worker_info is None:
-                self.num_workers = 1
-                self.worker_index = 0
-            else:
-                self.num_workers = worker_info.num_workers
-                self.worker_index = worker_info.id
-                print(f"{worker_info.id = }")
             """Store in self the data or pointers to it"""
             # Update keys of the dictionary from deprecated names
             self._update_dict(study_description)
@@ -70,9 +62,7 @@ class CreateTorchDataloader(configure.ChunkLocations):
 
             def my_iterable():
                 """This is the iterable that we will return"""
-                print("Starting my_iterable")
                 study_description = self.study_description
-                num_chunks = 0
                 study_dict = {
                     # !!! Is it better to have the dictionary values be length-one
                     # !!! lists, here and below?
@@ -83,7 +73,6 @@ class CreateTorchDataloader(configure.ChunkLocations):
                     if key != "slides"
                 }
                 for slide_description in study_description["slides"].values():
-                    print("  Starting slide")
                     slide_dict = {
                         **study_dict,
                         **{
@@ -104,15 +93,6 @@ class CreateTorchDataloader(configure.ChunkLocations):
                     )
 
                     for chunk_description in slide_description["chunks"].values():
-                        print("    Starting chunk")
-                        if num_chunks % self.num_workers != self.worker_index:
-                            # This chunk is not included in this shard.
-                            num_chunks += 1
-                            print("      Abandoning chunk")
-                            continue
-                        # This chunk is included in this shard.
-                        print("      Keeping chunk")
-                        num_chunks += 1
                         chunk_dict = {
                             **slide_dict,
                             **{
@@ -153,7 +133,6 @@ class CreateTorchDataloader(configure.ChunkLocations):
                         scaled_chunk_pixels = torch.from_numpy(scaled_chunk_pixels)
 
                         for tile_description in chunk_description["tiles"].values():
-                            print("      Starting tile")
                             tile_dict = {
                                 **chunk_dict,
                                 **{
@@ -186,15 +165,10 @@ class CreateTorchDataloader(configure.ChunkLocations):
                             # scaled_tile_pixels, tile_dict` we use lists and pop() so
                             # that this iterator does not maintain a reference count for
                             # the returned objects.
-                            print("        my_iterator yielding")
                             pixels_in_list = [scaled_tile_pixels]
                             dict_in_list = [tile_dict]
                             del scaled_tile_pixels, tile_dict
                             yield pixels_in_list.pop(), dict_in_list.pop()
-                            """
-                            yield scaled_tile_pixels, tile_dict
-                            """
-                            print("        my_iterator resuming after yield")
 
             """Return this generator (iterable) over the tiles"""
             return my_iterable()
@@ -205,18 +179,17 @@ class CreateTorchDataloader(configure.ChunkLocations):
         # !!! Instead, get `batch_size` from somewhere
         self.batch_size = 1
 
-    def __call__(self, study_description, num_workers=None):
+    def __call__(self, study_description):
         """
         From scratch, creates a torch dataloader with one torch element per tile
         """
         # Call to superclass to find the locations for the chunks
         super().__call__(study_description)
-        num_workers = 0 if num_workers is None else num_workers
 
         my_dataset = self.MyDataset(study_description)
         # !!! DataLoader has additional parameters that we may wish to use
         my_data_loader = torch.utils.data.DataLoader(
-            my_dataset, batch_size=self.batch_size, num_workers=num_workers
+            my_dataset, batch_size=self.batch_size
         )
 
         return my_data_loader

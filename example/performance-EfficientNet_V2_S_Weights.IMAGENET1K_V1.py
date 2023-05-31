@@ -20,12 +20,10 @@ import argparse
 import histomics_stream as hs
 import histomics_stream.pytorch
 import itertools
-import numpy as np
 import os
 import pooch
 import time
 import torch
-import torch.multiprocessing as mp
 import torchvision
 
 """
@@ -107,9 +105,8 @@ def build_model(device="cuda"):
     return unwrapped_model, model
 
 
-def create_study(wsi_path, mask_path, chunk_size, num_workers):
+def create_study(wsi_path, mask_path, chunk_size):
     start_time = time.time()
-    print("Starting create_study()")
     slide_name = os.path.splitext(os.path.split(wsi_path)[1])[0]
     slide_group = "Group 3"
 
@@ -145,7 +142,7 @@ def create_study(wsi_path, mask_path, chunk_size, num_workers):
 
     start_time = time.time()
     create_torch_dataloader = hs.pytorch.CreateTorchDataloader()
-    tiles = create_torch_dataloader(study, num_workers=num_workers)
+    tiles = create_torch_dataloader(study)
     print(f"#tiles = {len(create_torch_dataloader.get_tiles(study)[0][1])}")
     print(f"Chunked study in {time.time() - start_time}s", flush=True)
     return study, tiles
@@ -172,9 +169,13 @@ def show_structure(x):
             return f"{{{len(x)} of {show_structure(next(iter(x.keys())))}: {show_structure(next(iter(x.values())))}}}"
         else:
             return repr(dict())
-    if isinstance(x, np.ndarray):
-        return f"numpy.ndarray.shape={x.shape} of np.{x.dtype}"
     return repr(type(x))
+
+
+"""
+!!! Probably we should be using torch.utils.data.DataLoader batch_size option instead of
+!!! this batched() function.
+"""
 
 
 def batched(iterable, batch_size):
@@ -189,12 +190,9 @@ def batched(iterable, batch_size):
     while batch:
         # Yield `batch` in such a way that this iterator does not keep a reference count
         # for it.
-        """
         batch_in_list = [batch]
         del batch
         yield batch_in_list.pop()
-        """
-        yield batch
         batch = list(itertools.islice(iterator, batch_size))
 
 
@@ -205,7 +203,6 @@ def predict_and_detach(model, item):
 
 def predict(take_predictions, prediction_batch, model, tiles):
     start_time = time.time()
-    print("Starting predict()")
     if take_predictions > 0:
         tiles = itertools.islice(tiles, take_predictions)
     batched_tiles = (
@@ -213,27 +210,17 @@ def predict(take_predictions, prediction_batch, model, tiles):
     )
     predictions = list()
     for batch in batched_tiles:
-        print("Starting predict batch")
         batch_predictions = [predict_and_detach(model, item) for item in batch]
         predictions.extend(batch_predictions)
-        print("Finished predict batch")
     del batch_predictions, batch
     print(f"Made predictions in {time.time() - start_time}s", flush=True)
     return predictions
 
 
 def create_and_predict(
-    wsi_path,
-    mask_path,
-    chunk_size,
-    num_workers,
-    take_predictions,
-    prediction_batch,
-    model,
+    wsi_path, mask_path, chunk_size, take_predictions, prediction_batch, model
 ):
-    study, tiles = create_study(
-        wsi_path, mask_path, chunk_size, num_workers=num_workers
-    )
+    study, tiles = create_study(wsi_path, mask_path, chunk_size)
     predictions = predict(take_predictions, prediction_batch, model, tiles)
     print(f"show_structure(predictions) = {show_structure(predictions)}")
 
@@ -245,13 +232,10 @@ if __name__ == "__main__":
     # device = "cuda" if True else "cpu"
     device = args.device
     print(f"***** device = {device} *****")
-    take_predictions = 2**0 if True else 0
+    take_predictions = 2**8 if True else 0
 
-    num_workers = 2
     wsi_path, mask_path = get_data()
     unwrapped_model, model = build_model(device=device)
-    if num_workers is not None:
-        model.share_memory()
 
     # for prediction_batch in [2**j for j in range(0, 6)]:
     for prediction_batch in [0]:
@@ -262,34 +246,12 @@ if __name__ == "__main__":
                 f" take_predictions = {take_predictions} ****",
                 flush=True,
             )
-            if num_workers is None:
-                create_and_predict(
-                    wsi_path,
-                    mask_path,
-                    chunk_size,
-                    None,
-                    take_predictions,
-                    prediction_batch,
-                    model,
-                )
-            else:
-                processes = []
-                for worker_index in range(num_workers):
-                    p = mp.Process(
-                        target=create_and_predict,
-                        args=(
-                            wsi_path,
-                            mask_path,
-                            chunk_size,
-                            num_workers,
-                            take_predictions,
-                            prediction_batch,
-                            model,
-                        ),
-                    )
-                    processes.append(p)
-                    p.start()
-                for p in processes:
-                    print("Joining")
-                    p.join()
+            create_and_predict(
+                wsi_path,
+                mask_path,
+                chunk_size,
+                take_predictions,
+                prediction_batch,
+                model,
+            )
     print(f"***** Finished with device = {device} *****")

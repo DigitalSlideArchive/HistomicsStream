@@ -119,8 +119,8 @@ def create_study(wsi_path, mask_path, chunk_size):
         version="version-1",
         tile_height=224,
         tile_width=224,
-        overlap_height=196,
-        overlap_width=196,
+        overlap_height=0,
+        overlap_width=0,
         slides=dict(
             Slide_0=dict(
                 filename=wsi_path,
