@@ -119,7 +119,8 @@ class CreateTensorFlowDataset(configure.ChunkLocations):
 
         # print(f"study_dataset.element_spec = {study_dataset.element_spec}")
 
-        # Shard the dataset
+        # Shard the dataset before we have broken chunks into tiles so that all a
+        # chunk's tiles stay together.
         if num_workers != 1 or worker_index != 0:
             study_dataset = study_dataset.shard(num_workers, worker_index)
 

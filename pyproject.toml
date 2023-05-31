@@ -14,10 +14,10 @@ dependencies = [
     "imagecodecs",
     "itk",
     "numcodecs",
-    "numpy<1.24",
+    "numpy",
     "scipy",
-    "tensorflow",
-    "torch",
+    "tensorflow<3.0.0",
+    "torch<2.0.0",
     "zarr",
 ]
 dynamic = ["version", "description"]
