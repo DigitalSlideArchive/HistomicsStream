@@ -184,10 +184,14 @@ class FindResolutionForSlide(_TilesByCommon):
 
         # Do the work.
         if not re.compile(r"\.zarr$").search(filename):
-            import large_image
-
-            # read whole-slide image file and create large_image object
-            ts = large_image.open(filename)
+            
+            # create large_image, prioritizing tiff source over openslide
+            try:
+                import large_image_source_tiff
+                ts = large_image_source_tiff.open(filename)
+            except:
+                import large_image
+                ts = large_image.open(filename)
 
             # scan_magnification = highest available magnification from source
             scan_magnification = float(ts.getNativeMagnification()["magnification"])
