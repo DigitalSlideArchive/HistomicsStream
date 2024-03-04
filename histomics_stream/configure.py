@@ -20,14 +20,15 @@
 
 import copy
 import itertools
-import itk
-import large_image
-import large_image_source_tiff
 import math
-import numpy as np
 import os
 import random
 import re
+
+import itk
+import large_image
+import large_image_source_tiff
+import numpy as np
 import scipy.interpolate
 
 
@@ -184,13 +185,15 @@ class FindResolutionForSlide(_TilesByCommon):
 
         # Do the work.
         if not re.compile(r"\.zarr$").search(filename):
-            
+
             # create large_image, prioritizing tiff source over openslide
             try:
                 import large_image_source_tiff
+
                 ts = large_image_source_tiff.open(filename)
             except:
                 import large_image
+
                 ts = large_image.open(filename)
 
             # scan_magnification = highest available magnification from source
@@ -442,16 +445,12 @@ class TilesByGridAndMask(_TilesByCommon):
         overlap_height = (
             kwargs["overlap_height"]
             if "overlap_height" in kwargs
-            else study["overlap_height"]
-            if "overlap_height" in study
-            else 0
+            else study["overlap_height"] if "overlap_height" in study else 0
         )
         overlap_width = (
             kwargs["overlap_width"]
             if "overlap_width" in kwargs
-            else study["overlap_width"]
-            if "overlap_width" in study
-            else 0
+            else study["overlap_width"] if "overlap_width" in study else 0
         )
 
         # Check values.
@@ -1151,16 +1150,20 @@ class ChunkLocations(_TilesByCommon):
             # Process this internal node
             means = subtree["means"]
             recurse = dict(
-                (qkey, self._find_in_range_and_delete(qvalue))
-                if all(
-                    (
-                        self.maxs[col] > means[col]
-                        if qkey & 2 ** (self.data.shape[1] - 1 - col)
-                        else self.mins[col] < means[col]
-                        for col in range(self.data.shape[1])
+                (
+                    (qkey, self._find_in_range_and_delete(qvalue))
+                    if all(
+                        (
+                            (
+                                self.maxs[col] > means[col]
+                                if qkey & 2 ** (self.data.shape[1] - 1 - col)
+                                else self.mins[col] < means[col]
+                            )
+                            for col in range(self.data.shape[1])
+                        )
                     )
+                    else (qkey, (self.no_indices, qvalue))
                 )
-                else (qkey, (self.no_indices, qvalue))
                 for qkey, qvalue in subtree["quadrants"].items()
             )
             indices = np.array(

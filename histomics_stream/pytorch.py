@@ -20,7 +20,9 @@
 
 import numpy as np
 import torch
+
 from . import configure
+
 
 """
 See: How to load a list of numpy arrays to pytorch dataset loader?

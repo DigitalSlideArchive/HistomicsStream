@@ -17,14 +17,17 @@
 # =========================================================================
 
 import argparse
-import histomics_stream as hs
-import histomics_stream.pytorch
 import itertools
 import os
-import pooch
 import time
+
+import pooch
 import torch
 import torchvision
+
+import histomics_stream as hs
+import histomics_stream.pytorch
+
 
 """
 This is a script that is used to make timings of histomics_stream.  To some extent, it

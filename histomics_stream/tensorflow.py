@@ -19,7 +19,9 @@
 """Whole-slide image streamer for machine learning frameworks."""
 
 import math
+
 import tensorflow as tf
+
 from . import configure
 
 

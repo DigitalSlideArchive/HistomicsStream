@@ -16,13 +16,16 @@
 #
 # =========================================================================
 
-import histomics_stream as hs
-import histomics_stream.tensorflow
 import os
+import time
+
 import pooch
 import tensorflow as tf
 import tensorflow_datasets as tfds
-import time
+
+import histomics_stream as hs
+import histomics_stream.tensorflow
+
 
 """
 This is a script that is used to make timings of histomics_stream.  To some extent, it
