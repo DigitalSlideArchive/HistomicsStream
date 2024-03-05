@@ -23,9 +23,9 @@ with jpeg or jpeg2k compression.
 
 """
 
-from imagecodecs import jpeg_encode, jpeg_decode, jpeg2k_encode, jpeg2k_decode
+from imagecodecs import jpeg2k_decode, jpeg2k_encode, jpeg_decode, jpeg_encode
 from numcodecs.abc import Codec
-from numcodecs.compat import ensure_ndarray, ensure_contiguous_ndarray, ndarray_copy
+from numcodecs.compat import ensure_contiguous_ndarray, ensure_ndarray, ndarray_copy
 from numcodecs.registry import register_codec
 
 
