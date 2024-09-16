@@ -41,7 +41,7 @@ jobs:
 
       - name: Install histomics_stream
         run: |
-          pip install .
+          pip install .[tensorflow,torch,zarr]
 
       - name: Lint with flake8
         run: |

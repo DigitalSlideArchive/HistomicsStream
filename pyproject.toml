@@ -8,7 +8,7 @@ readme = "README.md"
 requires-python = ">=3.6"
 authors = [{name = "Lee A. Newberg", email = "lee.newberg@kitware.com"}]
 maintainers = [{name = "Lee A. Newberg", email = "lee.newberg@kitware.com"}]
-keywords = ["tensorflow", "whole slide image", "stream", "machine learning"]
+keywords = ["tensorflow", "torch", "whole slide image", "stream", "machine learning"]
 classifiers = ["License :: OSI Approved :: Apache Software License"]
 dependencies = [
     "imagecodecs",
@@ -16,11 +16,20 @@ dependencies = [
     "numcodecs",
     "numpy",
     "scipy",
-    "tensorflow<3.0.0",
-    "torch<2.0.0",
-    "zarr",
 ]
 dynamic = ["version", "description"]
+
+[project.optional-dependencies]
+tensorflow = [
+    "tensorflow<3.0.0",
+    "keras",
+]
+torch = [
+    "torch<2.0.0",
+]
+zarr = [
+    "zarr",
+]
 
 [project.urls]
 Source = "https://github.com/DigitalSlideArchive/HistomicsStream"
