@@ -16,7 +16,9 @@ sudo apt install -y python3-openslide openslide-tools
 pip install histomics_stream 'large_image[openslide]' \
   scikit_image --find-links https://girder.github.io/large_image_wheels
 ```
-Note that additional image readers can be supported by using, e.g., `large_image[openslide,ometiff,openjpeg,bioformats]` instead of `large_image[openslide]`.
+Additional functionality is supported with subpackages, e.g., `histomics_stream[tensorflow,torch,zarr]`. These packages are optional when histomics_stream is used only for masking and/or organizing image tiles into larger image chunks that are more efficient to read than individual image tiles.  However, if you are creating a tensorflow `Dataset` or a pytorch `DataLoader` then you will need the corresponding packages.
+
+Additional image readers can be supported by using, e.g., `large_image[openslide,ometiff,openjpeg,bioformats]` instead of `large_image[openslide]`.
 
 After launching `python3`, import the `histomics_stream` package with:
 
