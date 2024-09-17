@@ -589,7 +589,7 @@ class TilesByGridAndMask(_TilesByCommon):
         if 0 <= self.randomly_select < len(slide["tiles"]):
             # Choose a subset of the tiles randomly
             slide["tiles"] = dict(
-                random.sample(slide["tiles"].items(), self.randomly_select)
+                random.sample(sorted(slide["tiles"].items()), self.randomly_select)
             )
 
     def check_mask_filename(self, mask_filename):
@@ -806,7 +806,7 @@ class TilesByList(_TilesByCommon):
         if 0 <= self.randomly_select < len(slide["tiles"]):
             # Choose a subset of the tiles randomly
             slide["tiles"] = dict(
-                random.sample(slide["tiles"].items(), self.randomly_select)
+                random.sample(sorted(slide["tiles"].items()), self.randomly_select)
             )
 
 
