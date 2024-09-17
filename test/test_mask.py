@@ -27,12 +27,10 @@ def test_mask_threshold():
     wsi_path = pooch.retrieve(
         fname="TCGA-AN-A0G0-01Z-00-DX1.svs",
         url=(
-            "https://drive.google.com/uc"
+            "https://drive.usercontent.google.com/download"
             "?export=download"
             "&id=19agE_0cWY582szhOVxp9h3kozRfB4CvV"
             "&confirm=t"
-            "&uuid=6f2d51e7-9366-4e98-abc7-4f77427dd02c"
-            "&at=ALgDtswlqJJw1KU7P3Z1tZNcE01I:1679111148632"
         ),
         known_hash="d046f952759ff6987374786768fc588740eef1e54e4e295a684f3bd356c8528f",
         path=str(pooch.os_cache("pooch")) + os.sep + "wsi",
@@ -43,9 +41,10 @@ def test_mask_threshold():
     mask_path = pooch.retrieve(
         fname="TCGA-AN-A0G0-01Z-00-DX1.mask.png",
         url=(
-            "https://drive.google.com/uc"
+            "https://drive.usercontent.google.com/download"
             "?export=download"
             "&id=17GOOHbL8Bo3933rdIui82akr7stbRfta"
+            "&confirm=t"
         ),
         known_hash="bb657ead9fd3b8284db6ecc1ca8a1efa57a0e9fd73d2ea63ce6053fbd3d65171",
         path=str(pooch.os_cache("pooch")) + os.sep + "wsi",

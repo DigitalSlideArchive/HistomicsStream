@@ -26,8 +26,6 @@ import random
 import re
 
 import itk
-import large_image
-import large_image_source_tiff
 import numpy as np
 import scipy.interpolate
 
@@ -185,7 +183,6 @@ class FindResolutionForSlide(_TilesByCommon):
 
         # Do the work.
         if not re.compile(r"\.zarr$").search(filename):
-
             # create large_image, prioritizing tiff source over openslide
             try:
                 import large_image_source_tiff
@@ -592,7 +589,7 @@ class TilesByGridAndMask(_TilesByCommon):
         if 0 <= self.randomly_select < len(slide["tiles"]):
             # Choose a subset of the tiles randomly
             slide["tiles"] = dict(
-                random.sample(slide["tiles"].items(), self.randomly_select)
+                random.sample(sorted(slide["tiles"].items()), self.randomly_select)
             )
 
     def check_mask_filename(self, mask_filename):
@@ -809,7 +806,7 @@ class TilesByList(_TilesByCommon):
         if 0 <= self.randomly_select < len(slide["tiles"]):
             # Choose a subset of the tiles randomly
             slide["tiles"] = dict(
-                random.sample(slide["tiles"].items(), self.randomly_select)
+                random.sample(sorted(slide["tiles"].items()), self.randomly_select)
             )
 
 
@@ -1060,6 +1057,9 @@ class ChunkLocations(_TilesByCommon):
         # ChunkLocations.read_large_image._num_chunks += 1
 
         # print(f"{chunk_name} begin {datetime.datetime.now()}")
+        import large_image
+        import large_image_source_tiff
+
         ts = (
             large_image_source_tiff.open(filename)
             if os.path.splitext(filename)[1] in (".tif", ".tiff", ".svs")

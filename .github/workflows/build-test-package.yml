@@ -8,7 +8,7 @@ jobs:
     strategy:
       max-parallel: 2
       matrix:
-        python-version: ["3.6", "3.7", "3.8", "3.9"]
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
 
         include:
           - flake8-python-git-tag: ""
@@ -41,7 +41,11 @@ jobs:
 
       - name: Install histomics_stream
         run: |
-          pip install .
+          pip install .[tensorflow,torch,zarr]
+          # With Python 3.8, tensorflow downgrades typing-extensions, which appears to
+          # be unnecessary and breaks a dependency of large_image, so we overrule that
+          # next.
+          pip install --upgrade typing-extensions
 
       - name: Lint with flake8
         run: |
