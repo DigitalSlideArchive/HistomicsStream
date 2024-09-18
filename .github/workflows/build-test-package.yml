@@ -16,7 +16,7 @@ jobs:
           - pytest-python-git-tag: ""
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: 'Free up disk space'
         run: |
           # Workaround for https://github.com/actions/virtual-environments/issues/709
