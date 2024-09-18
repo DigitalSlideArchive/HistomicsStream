@@ -76,6 +76,7 @@ jobs:
       run: >-
         python -m build --sdist --wheel --outdir dist/ .
     - name: Publish to Test PyPI
+      if: github.event.repository.fork == false
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         password: ${{ secrets.TEST_PYPI_API_TOKEN }}
